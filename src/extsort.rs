@@ -29,9 +29,10 @@ impl Iterator for Sorted {
 }
 
 /// Rough heap cost of a row: the text, the key copy, csv's per-field bounds
-/// and the Vec/String headers. Close enough to keep the budget honest.
+/// and allocator overhead, plus two slots of the buffer Vec, because a Vec
+/// that just doubled holds up to twice the slots it has rows.
 fn cost(r: &Rec) -> usize {
-    r.row.as_slice().len() + r.key.len() + r.row.len() * 16 + 96
+    r.row.as_slice().len() + r.key.len() + r.row.len() * 16 + 96 + 2 * size_of::<Rec>()
 }
 
 /// Sort a file's rows by key using at most about `budget` bytes of row data.
