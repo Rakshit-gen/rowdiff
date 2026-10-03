@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { type Kind, type RowFilter, type Status, exportUrl } from "./api";
 import { ChangeTable } from "./ChangeTable";
 import { num, plural } from "./format";
@@ -65,6 +65,7 @@ export function Results(props: { status: Status; onReset: () => void }) {
   return (
     <section className="results">
       {header}
+      <Split counts={counts} unchanged={s.unchanged} filter={filter} onPick={(kind) => setFilter({ kind })} />
       <SchemaNote status={status} />
       <div className="results-body">
         <aside className="columns-panel">
@@ -94,23 +95,7 @@ export function Results(props: { status: Status; onReset: () => void }) {
           )}
         </aside>
         <div className="table-panel">
-          <div className="tabs" role="tablist">
-            {TABS.filter((t) => t.kind !== "duplicate" || counts.duplicate > 0).map((t) => {
-              const on = !filter.column && filter.kind === t.kind;
-              return (
-                <button
-                  key={t.kind}
-                  type="button"
-                  role="tab"
-                  aria-selected={on}
-                  className={`tab tab-${t.kind}`}
-                  onClick={() => setFilter({ kind: t.kind })}
-                >
-                  {t.label} <span className="tab-count">{num(counts[t.kind])}</span>
-                </button>
-              );
-            })}
-          </div>
+          <Tabs filter={filter} counts={counts} onPick={(kind) => setFilter({ kind })} />
           {filter.column && (
             <p className="filter-note">
               Showing rows where <code>{filter.column}</code> changed.{" "}
@@ -129,6 +114,85 @@ export function Results(props: { status: Status; onReset: () => void }) {
         </div>
       </div>
     </section>
+  );
+}
+
+const SEGMENTS: { kind: Kind; label: string }[] = [
+  { kind: "changed", label: "changed" },
+  { kind: "added", label: "added" },
+  { kind: "removed", label: "removed" },
+];
+
+/**
+ * Every row key from both files as one bar, split by what happened to it.
+ * The colored parts filter the table; the gray part is rows that match.
+ */
+function Split(props: {
+  counts: Record<Kind | "all", number>;
+  unchanged: number;
+  filter: RowFilter;
+  onPick: (k: Kind) => void;
+}) {
+  const { counts, unchanged } = props;
+  const total = counts.changed + counts.added + counts.removed + unchanged;
+  if (total === 0) return null;
+  const pct = (n: number) => `${((n / total) * 100).toFixed(1)}%`;
+  return (
+    <div className="split" aria-label="Rows by outcome">
+      {SEGMENTS.filter((g) => counts[g.kind] > 0).map((g) => (
+        <button
+          key={g.kind}
+          type="button"
+          className={`split-part split-${g.kind}`}
+          style={{ flexGrow: counts[g.kind] }}
+          aria-pressed={!props.filter.column && props.filter.kind === g.kind}
+          title={`${num(counts[g.kind])} ${g.label} (${pct(counts[g.kind])}). Click to show them.`}
+          onClick={() => props.onPick(g.kind)}
+        >
+          <span className="visually-hidden">
+            Show {num(counts[g.kind])} {g.label} rows
+          </span>
+        </button>
+      ))}
+      {unchanged > 0 && (
+        <span
+          className="split-part split-same"
+          style={{ flexGrow: unchanged }}
+          title={`${num(unchanged)} the same (${pct(unchanged)})`}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The kind tabs, with an underline that slides to the selected one. */
+function Tabs(props: { filter: RowFilter; counts: Record<Kind | "all", number>; onPick: (k: Kind | "all") => void }) {
+  const { filter, counts } = props;
+  const list = useRef<HTMLDivElement>(null);
+  const [mark, setMark] = useState<{ left: number; width: number } | null>(null);
+  const selected = filter.column ? null : filter.kind;
+
+  useLayoutEffect(() => {
+    const el = list.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    setMark(el ? { left: el.offsetLeft, width: el.offsetWidth } : null);
+  }, [selected]);
+
+  return (
+    <div className="tabs" role="tablist" ref={list}>
+      {TABS.filter((t) => t.kind !== "duplicate" || counts.duplicate > 0).map((t) => (
+        <button
+          key={t.kind}
+          type="button"
+          role="tab"
+          aria-selected={selected === t.kind}
+          className={`tab tab-${t.kind}`}
+          onClick={() => props.onPick(t.kind)}
+        >
+          {t.label} <span className="tab-count">{num(counts[t.kind])}</span>
+        </button>
+      ))}
+      {mark && <span className="tab-mark" style={{ transform: `translateX(${mark.left}px)`, width: mark.width }} />}
+    </div>
   );
 }
 

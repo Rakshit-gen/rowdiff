@@ -449,9 +449,67 @@ code,
   height: 2px;
   max-width: calc(100% - 12px);
   background: var(--changed);
+  transform-origin: left;
+  animation: grow 500ms var(--ease-out);
+}
+
+@keyframes grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.split {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  margin-top: 16px;
+  animation: reveal 600ms var(--ease-out);
+}
+
+@keyframes reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+.split-part {
+  min-width: 4px;
+  border: 0;
+  padding: 0;
+  border-radius: 2px;
+  transition:
+    transform var(--quick),
+    opacity var(--quick);
+}
+
+button.split-part {
+  cursor: pointer;
+}
+
+button.split-part:hover,
+.split-part[aria-pressed="true"] {
+  transform: scaleY(1.6);
+}
+
+.split-changed {
+  background: var(--changed);
+}
+
+.split-added {
+  background: var(--added);
+}
+
+.split-removed {
+  background: var(--removed);
+}
+
+.split-same {
+  background: var(--line);
 }
 
 .tabs {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
@@ -476,8 +534,17 @@ code,
 
 .tab[aria-selected="true"] {
   color: var(--ink);
-  border-bottom-color: var(--ink);
-  font-weight: 600;
+}
+
+.tab-mark {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ink);
+  transition:
+    transform 220ms var(--ease-out),
+    width 220ms var(--ease-out);
 }
 
 .tab-count {
