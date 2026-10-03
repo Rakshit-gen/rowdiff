@@ -1,0 +1,52 @@
+:root {
+  --ground: #faf9f6;
+  --surface: #ffffff;
+  --ink: #1c1c1a;
+  --muted: #5f5c55;
+  --line: #e2dfd8;
+  --line-strong: #c9c5bb;
+  --added: #1a7f37;
+  --added-bg: #e7f5ea;
+  --removed: #b42318;
+  --removed-bg: #fbeae8;
+  --changed: #8a5a00;
+  --changed-bg: #fdf3dc;
+  --focus: #2457c5;
+  --radius: 4px;
+  --sans: "Source Sans 3 Variable", system-ui, sans-serif;
+  --mono: "Source Code Pro", ui-monospace, monospace;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 16px/1.5 var(--sans);
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.lede {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
