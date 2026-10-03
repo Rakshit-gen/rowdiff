@@ -281,3 +281,178 @@ h1 {
     transition: none;
   }
 }
+
+code,
+.file {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.results-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+}
+
+.summary-line {
+  margin: 0;
+  font-size: 17px;
+}
+
+.results-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.nothing {
+  font-size: 17px;
+  margin-top: 24px;
+}
+
+.schema-note {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.schema-note p {
+  margin: 0 0 4px;
+}
+
+.results-body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 24px;
+}
+
+@media (max-width: 800px) {
+  .results-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.columns-panel h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 6px 0 8px;
+}
+
+.columns-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.column-row {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 4px 6px 8px;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.column-row:hover {
+  border-color: var(--line-strong);
+}
+
+.column-row[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--surface);
+}
+
+.column-name {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.column-bar {
+  position: absolute;
+  left: 6px;
+  bottom: 3px;
+  height: 2px;
+  max-width: calc(100% - 12px);
+  background: var(--changed);
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  font: inherit;
+  font-size: 15px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+  font-weight: 600;
+}
+
+.tab-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.tab-added .tab-count {
+  color: var(--added);
+}
+
+.tab-removed .tab-count {
+  color: var(--removed);
+}
+
+.tab-changed .tab-count {
+  color: var(--changed);
+}
+
+.filter-note {
+  font-size: 14px;
+  margin: 8px 0 0;
+}
+
+.link {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--focus);
+  text-decoration: underline;
+  cursor: pointer;
+}

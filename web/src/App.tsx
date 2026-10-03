@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { type DiffRequest, type Status, getStatus, startDiff } from "./api";
+import { type DiffRequest, type Status, deleteDiff, getStatus, startDiff } from "./api";
+import { Results } from "./Results";
 import { Running } from "./Running";
 import { Setup } from "./Setup";
 
@@ -52,7 +53,15 @@ export function App() {
         {view.name === "setup" && view.error && <p className="error">{view.error}</p>}
       </div>
       {view.name === "running" && <Running upload={view.upload} status={view.status} />}
-      {view.name === "done" && <pre>{JSON.stringify(view.status.summary, null, 2)}</pre>}
+      {view.name === "done" && (
+        <Results
+          status={view.status}
+          onReset={() => {
+            void deleteDiff(view.status.id);
+            setView({ name: "setup" });
+          }}
+        />
+      )}
     </main>
   );
 }
