@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type Change, type RowFilter, getRows } from "./api";
+import { type Change, type RowFilter, type Status, getRows } from "./api";
+import { RowDetail } from "./RowDetail";
 
 const ROW = 34;
 const PAGE = 200;
@@ -17,8 +18,11 @@ const MARK_LABEL: Record<Change["kind"], string> = {
  * Only the rows on screen exist in the DOM, and rows are fetched from the
  * server a page at a time as they scroll into view.
  */
-export function ChangeTable(props: { id: number; filter: RowFilter; total: number; keyCols: string[]; columns: string[] }) {
-  const { id, filter, total, keyCols, columns } = props;
+export function ChangeTable(props: { status: Status; filter: RowFilter; total: number }) {
+  const { status, filter, total } = props;
+  const { id, key: keyCols } = status;
+  const columns = status.compared_columns ?? [];
+  const [open, setOpen] = useState<Change | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(560);
@@ -60,7 +64,9 @@ export function ChangeTable(props: { id: number; filter: RowFilter; total: numbe
   const rows = [];
   for (let i = first; i < last; i++) {
     const c = pages.get(Math.floor(i / PAGE))?.[i % PAGE];
-    rows.push(<Row key={i} index={i} change={c} cols={cols} keyCount={keyCols.length} template={template} />);
+    rows.push(
+      <Row key={i} index={i} change={c} cols={cols} keyCount={keyCols.length} template={template} onOpen={setOpen} />,
+    );
   }
 
   if (total === 0) return <p className="help empty-table">Nothing to show here.</p>;
@@ -81,11 +87,19 @@ export function ChangeTable(props: { id: number; filter: RowFilter; total: numbe
         <div style={{ height: total * ROW, position: "relative" }}>{rows}</div>
       </div>
       {error && <p className="error">{error}</p>}
+      {open && <RowDetail change={open} status={status} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function Row(props: { index: number; change: Change | undefined; cols: string[]; keyCount: number; template: string }) {
+function Row(props: {
+  index: number;
+  change: Change | undefined;
+  cols: string[];
+  keyCount: number;
+  template: string;
+  onOpen: (c: Change) => void;
+}) {
   const { change: c, cols, keyCount } = props;
   const style = { top: props.index * ROW, height: ROW, gridTemplateColumns: props.template };
   if (!c) {
@@ -97,7 +111,15 @@ function Row(props: { index: number; change: Change | undefined; cols: string[];
   }
   const changed = c.kind === "changed" ? new Map(c.cells.map((x) => [x.column, x])) : null;
   return (
-    <div className={`tr row-${c.kind}`} role="row" aria-rowindex={props.index + 2} style={style}>
+    <div
+      className={`tr row-${c.kind} clickable`}
+      role="row"
+      tabIndex={0}
+      aria-rowindex={props.index + 2}
+      style={style}
+      onClick={() => props.onOpen(c)}
+      onKeyDown={(e) => e.key === "Enter" && props.onOpen(c)}
+    >
       <span className="td mark" role="cell" title={MARK_LABEL[c.kind]}>
         <span aria-hidden>{MARK[c.kind]}</span>
         <span className="visually-hidden">{MARK_LABEL[c.kind]}</span>

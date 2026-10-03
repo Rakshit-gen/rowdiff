@@ -121,12 +121,11 @@ export function Results(props: { status: Status; onReset: () => void }) {
           )}
           <ChangeTable
             key={JSON.stringify(filter)}
-            id={status.id}
+            status={status}
             filter={filter}
             total={filter.column ? (s.changed_by_column[filter.column] ?? 0) : counts[filter.kind ?? "all"]}
-            keyCols={status.key}
-            columns={status.compared_columns ?? []}
           />
+          <p className="help">Click a row, or press Enter on it, to see every column side by side.</p>
         </div>
       </div>
     </section>

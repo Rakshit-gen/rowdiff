@@ -577,3 +577,88 @@ code,
 .empty-table {
   padding: 24px 0;
 }
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+
+.clickable:focus-visible {
+  outline-offset: -2px;
+}
+
+.detail {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 20px;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+}
+
+.detail::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.detail-head h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.detail-table th,
+.detail-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.detail-table thead th {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.detail-table tbody th {
+  font-family: var(--mono);
+  font-weight: 600;
+  width: 28%;
+}
+
+.detail-table td {
+  font-family: var(--mono);
+}
+
+.detail-changed {
+  background: var(--changed-bg);
+}
+
+.detail-table del {
+  color: var(--removed);
+}
+
+.detail-table ins {
+  color: var(--added);
+  text-decoration: none;
+  font-weight: 600;
+}
