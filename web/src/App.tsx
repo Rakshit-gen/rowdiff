@@ -66,6 +66,28 @@ export function App() {
       <div hidden={view.name !== "setup"}>
         <Setup busy={view.name === "running"} onStart={start} />
         {view.name === "setup" && view.error && <p className="error">{view.error}</p>}
+        <section className="about">
+          <div>
+            <h2>How rows are matched</h2>
+            <p>
+              Each row is matched to the row with the same key in the other file. A key only the newer file has is
+              added, one only the older file has is removed. When both have it, every other column they share is
+              compared, and a row counts as changed if any of those differ.
+            </p>
+            <p>
+              Files that don't fit in memory are sorted on disk in pieces, so a few gigabytes is fine. Both files stay
+              on the machine running rowdiff and are deleted when you compare other files or stop the server.
+            </p>
+          </div>
+          <div>
+            <h2>From a terminal</h2>
+            <pre className="cmd">rowdiff yesterday.csv today.csv --key order_id</pre>
+            <p>
+              It prints the same summary and exits with 1 when the files differ, so it can fail a CI step. Add{" "}
+              <code>--format csv</code> or <code>--format jsonl</code> to get every change.
+            </p>
+          </div>
+        </section>
       </div>
       {view.name === "running" && <Running upload={view.upload} status={view.status} />}
       {view.name === "done" && (

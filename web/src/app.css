@@ -662,3 +662,43 @@ code,
   text-decoration: none;
   font-weight: 600;
 }
+
+.about {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 15px;
+}
+
+@media (max-width: 640px) {
+  .about {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+.about h2 {
+  font-size: 15px;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+
+.about p {
+  margin: 0 0 10px;
+  max-width: 60ch;
+}
+
+.cmd {
+  font: 13px/1.5 var(--mono);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  overflow-x: auto;
+}
