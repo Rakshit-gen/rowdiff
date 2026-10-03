@@ -17,6 +17,21 @@ export function App() {
     if (polling.current) window.clearTimeout(polling.current);
   }, []);
 
+  // A finished diff stays open across reloads through ?diff=<id>, for as long
+  // as the server still has it.
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("diff"));
+    if (!id) return;
+    getStatus(id)
+      .then((s) => s.status === "done" && setView({ name: "done", status: s }))
+      .catch(() => window.history.replaceState(null, "", window.location.pathname));
+  }, []);
+
+  useEffect(() => {
+    const url = view.name === "done" ? `?diff=${view.status.id}` : window.location.pathname;
+    window.history.replaceState(null, "", url);
+  }, [view]);
+
   async function start(req: DiffRequest) {
     setView({ name: "running", upload: 0, status: null });
     let status: Status;
