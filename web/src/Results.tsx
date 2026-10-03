@@ -127,8 +127,9 @@ const SEGMENTS: { kind: Kind; label: string }[] = [
 ];
 
 /**
- * Every row key from both files as one bar, split by what happened to it.
- * The colored parts filter the table; the gray part is rows that match.
+ * The rows that differ as one bar, split by kind. Matching rows are left out
+ * of the bar so a small diff in a big file is still readable; the caption
+ * says how small it is. Each part filters the table.
  */
 function Split(props: {
   counts: Record<Kind | "all", number>;
@@ -137,33 +138,31 @@ function Split(props: {
   onPick: (k: Kind) => void;
 }) {
   const { counts, unchanged } = props;
-  const total = counts.changed + counts.added + counts.removed + unchanged;
-  if (total === 0) return null;
-  const pct = (n: number) => `${((n / total) * 100).toFixed(1)}%`;
+  const differ = counts.changed + counts.added + counts.removed;
+  if (differ === 0) return null;
+  const share = (differ / (differ + unchanged)) * 100;
   return (
-    <div className="split" aria-label="Rows by outcome">
-      {SEGMENTS.filter((g) => counts[g.kind] > 0).map((g) => (
-        <button
-          key={g.kind}
-          type="button"
-          className={`split-part split-${g.kind}`}
-          style={{ flexGrow: counts[g.kind] }}
-          aria-pressed={!props.filter.column && props.filter.kind === g.kind}
-          title={`${num(counts[g.kind])} ${g.label} (${pct(counts[g.kind])}). Click to show them.`}
-          onClick={() => props.onPick(g.kind)}
-        >
-          <span className="visually-hidden">
-            Show {num(counts[g.kind])} {g.label} rows
-          </span>
-        </button>
-      ))}
-      {unchanged > 0 && (
-        <span
-          className="split-part split-same"
-          style={{ flexGrow: unchanged }}
-          title={`${num(unchanged)} the same (${pct(unchanged)})`}
-        />
-      )}
+    <div className="split-wrap">
+      <div className="split">
+        {SEGMENTS.filter((g) => counts[g.kind] > 0).map((g) => (
+          <button
+            key={g.kind}
+            type="button"
+            className={`split-part split-${g.kind}`}
+            style={{ flexGrow: counts[g.kind] }}
+            aria-pressed={!props.filter.column && props.filter.kind === g.kind}
+            onClick={() => props.onPick(g.kind)}
+          >
+            <span className="split-text">
+              {num(counts[g.kind])} {g.label}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="help">
+        {plural(differ, "row")} differ, {share < 0.1 ? "under 0.1" : share.toFixed(1)}% of the{" "}
+        {num(differ + unchanged)} keys in either file.
+      </p>
     </div>
   );
 }
