@@ -11,13 +11,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{DefaultBodyLimit, Multipart, Path as UrlPath, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
-use rowdiff::output::summary_json;
+use rowdiff::diff::Change;
+use rowdiff::output::{change_json, summary_json};
 use rowdiff::progress::Progress;
 use rowdiff::{Diff, Options, Report};
 use serde_json::{Value, json};
@@ -56,7 +57,89 @@ struct Job {
 enum JobState {
     Running,
     Failed(String),
-    Done(Report),
+    Done(Arc<Results>),
+}
+
+const KINDS: [&str; 4] = ["added", "removed", "changed", "duplicate"];
+
+/// A finished diff. Changes live one JSON object per line in `file`; the
+/// vectors here are just positions into it, so a page of any filtered view is
+/// a few seeks no matter how large the diff is. Positions are u32, which caps
+/// a single diff at about four billion changed rows.
+struct Results {
+    report: Report,
+    file: PathBuf,
+    /// Byte offset where each line starts, plus one past the last line.
+    offsets: Vec<u64>,
+    by_kind: [Vec<u32>; 4],
+    /// For each compared column, the changed rows that touch it.
+    by_column: Vec<Vec<u32>>,
+}
+
+impl Results {
+    fn read_lines(&self, ids: &[u32]) -> std::io::Result<Vec<Value>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = std::fs::File::open(&self.file)?;
+        let mut out = Vec::with_capacity(ids.len());
+        let mut buf = Vec::new();
+        for &i in ids {
+            let (start, end) = (self.offsets[i as usize], self.offsets[i as usize + 1]);
+            f.seek(SeekFrom::Start(start))?;
+            buf.resize((end - start - 1) as usize, 0);
+            f.read_exact(&mut buf)?;
+            out.push(serde_json::from_slice(&buf)?);
+        }
+        Ok(out)
+    }
+}
+
+/// Run a prepared diff, writing every change to `dir/changes.jsonl` and
+/// indexing it as it goes.
+fn run_job(d: Diff, progress: &Progress, dir: &Path) -> anyhow::Result<Results> {
+    use std::io::Write;
+    let file = dir.join("changes.jsonl");
+    let mut w = std::io::BufWriter::new(std::fs::File::create(&file)?);
+    let (a, b, cols) = (d.a.clone(), d.b.clone(), d.columns.clone());
+    let mut offsets = vec![0u64];
+    let mut by_kind: [Vec<u32>; 4] = Default::default();
+    let mut by_column = vec![Vec::new(); cols.common.len()];
+    let mut failed = None;
+
+    let report = d.run_with(progress, |c| {
+        if failed.is_some() {
+            return;
+        }
+        let n = (offsets.len() - 1) as u32;
+        let kind = match &c {
+            Change::Added { .. } => 0,
+            Change::Removed { .. } => 1,
+            Change::Changed { cells, .. } => {
+                for cell in cells {
+                    by_column[cell.col].push(n);
+                }
+                2
+            }
+            Change::Duplicate { .. } => 3,
+        };
+        by_kind[kind].push(n);
+        let mut line = change_json(&a, &b, &cols, &c).to_string();
+        line.push('\n');
+        if let Err(e) = w.write_all(line.as_bytes()) {
+            failed = Some(e);
+        }
+        offsets.push(offsets[n as usize] + line.len() as u64);
+    })?;
+    if let Some(e) = failed {
+        return Err(e.into());
+    }
+    w.flush()?;
+    Ok(Results {
+        report,
+        file,
+        offsets,
+        by_kind,
+        by_column,
+    })
 }
 
 /// An error the browser can show as is.
@@ -173,10 +256,10 @@ async fn create(
     let body = status_json(id, &job);
 
     tokio::task::spawn_blocking(move || {
-        let result = d.run_with(&job.progress, |_| {});
+        let result = run_job(d, &job.progress, &dir);
         *job.state.lock().unwrap() = match result {
-            Ok(report) => JobState::Done(report),
-            Err(e) => JobState::Failed(e.to_string()),
+            Ok(r) => JobState::Done(Arc::new(r)),
+            Err(e) => JobState::Failed(format!("{e:#}")),
         };
     });
     Ok((StatusCode::CREATED, Json(body)))
@@ -199,6 +282,7 @@ fn status_json(id: u64, job: &Job) -> Value {
             v["error"] = e.as_str().into();
         }
         JobState::Done(r) => {
+            let r = &r.report;
             v["status"] = "done".into();
             v["summary"] = summary_json(&r.columns, &r.summary);
             v["compared_columns"] = r
@@ -230,6 +314,75 @@ async fn status(
     Ok(Json(status_json(id, &job)))
 }
 
+#[derive(serde::Deserialize)]
+struct RowsQuery {
+    /// all, added, removed, changed or duplicate.
+    kind: Option<String>,
+    /// Only changed rows where this column changed.
+    column: Option<String>,
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+}
+
+/// One page of changes, optionally narrowed to a kind or a column.
+async fn rows(
+    State(app): State<Arc<App>>,
+    UrlPath(id): UrlPath<u64>,
+    Query(q): Query<RowsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let job = find(&app, id)?;
+    let results = match &*job.state.lock().unwrap() {
+        JobState::Done(r) => r.clone(),
+        JobState::Running => {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "this diff is still running".into(),
+            ));
+        }
+        JobState::Failed(e) => return Err(ApiError(StatusCode::CONFLICT, e.clone())),
+    };
+    let limit = q.limit.unwrap_or(200).min(1000);
+
+    let all: Vec<u32>;
+    let ids: &[u32] = if let Some(col) = &q.column {
+        let i = results
+            .report
+            .columns
+            .common
+            .iter()
+            .position(|c| &c.2 == col)
+            .ok_or_else(|| bad(format!("{col:?} is not one of the compared columns")))?;
+        &results.by_column[i]
+    } else {
+        match q.kind.as_deref().unwrap_or("all") {
+            "all" => {
+                all = (0..(results.offsets.len() - 1) as u32).collect();
+                &all
+            }
+            k => {
+                let i = KINDS.iter().position(|x| *x == k).ok_or_else(|| {
+                    bad(format!(
+                        "kind has to be all, {}, not {k:?}",
+                        KINDS.join(", ")
+                    ))
+                })?;
+                &results.by_kind[i]
+            }
+        }
+    };
+    let total = ids.len();
+    let page: Vec<u32> = ids.iter().skip(q.offset).take(limit).copied().collect();
+    let r = results.clone();
+    let lines = tokio::task::spawn_blocking(move || r.read_lines(&page))
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
+    Ok(Json(
+        json!({ "total": total, "offset": q.offset, "rows": lines }),
+    ))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -244,6 +397,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/diffs", post(create))
         .route("/api/diffs/{id}", get(status))
+        .route("/api/diffs/{id}/rows", get(rows))
         .layer(DefaultBodyLimit::max(cli.max_upload_mb << 20))
         .with_state(state)
         .fallback_service(ui);
