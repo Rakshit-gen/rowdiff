@@ -9,3 +9,5 @@ description = "Diff two CSV exports by key, including files larger than memory"
 csv = "1.3"
 thiserror = "2"
 tempfile = "3"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
