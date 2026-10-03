@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use rowdiff::diff::{Change, KEY_SEP, Side};
+use rowdiff::diff::{Change, KEY_SEP, Normalize, Side};
 use rowdiff::{Options, Report, diff_files};
 
 /// Compare two CSV exports by key.
@@ -24,6 +24,12 @@ struct Cli {
     /// Field delimiter, one byte. Use '\t' for tabs.
     #[arg(short, long, default_value = ",")]
     delimiter: String,
+    /// Ignore leading and trailing spaces in keys and values.
+    #[arg(long)]
+    trim: bool,
+    /// Treat "Pen" and "pen" as the same value.
+    #[arg(long)]
+    ignore_case: bool,
     /// Memory for sorting before it spills to disk, like 512M or 2G.
     #[arg(long, default_value = "512M", value_parser = parse_size)]
     memory: usize,
@@ -76,6 +82,7 @@ fn run() -> Result<bool> {
         key: cli.key,
         ignore: cli.ignore,
         delimiter: delimiter(&cli.delimiter)?,
+        normalize: Normalize { trim: cli.trim, ignore_case: cli.ignore_case },
         memory: cli.memory,
         tmp_dir: None,
     };

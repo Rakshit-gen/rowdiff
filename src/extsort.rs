@@ -6,7 +6,7 @@ use std::path::Path;
 
 use csv::StringRecord;
 
-use crate::diff::{Rec, make_key};
+use crate::diff::{Normalize, Rec, make_key};
 use crate::{Error, Header, Result};
 
 /// Rows of one file in key order.
@@ -40,13 +40,19 @@ fn cost(r: &Rec) -> usize {
 ///
 /// `sort_by` is stable and runs are numbered in file order, with the merge
 /// breaking ties by run number, so rows sharing a key keep their file order.
-pub fn sort_rows(header: &Header, mut reader: csv::Reader<File>, budget: usize, tmp: &Path) -> Result<Sorted> {
+pub fn sort_rows(
+    header: &Header,
+    mut reader: csv::Reader<File>,
+    norm: &Normalize,
+    budget: usize,
+    tmp: &Path,
+) -> Result<Sorted> {
     let mut buf: Vec<Rec> = Vec::new();
     let mut used = 0;
     let mut runs = Vec::new();
     for row in reader.records() {
         let row = row.map_err(|e| csv_err(&header.path, e))?;
-        let rec = Rec { key: make_key(&row, &header.key_idx), row };
+        let rec = Rec { key: make_key(&row, &header.key_idx, norm), row };
         used += cost(&rec);
         buf.push(rec);
         if used >= budget {
@@ -170,7 +176,7 @@ mod tests {
         File::create(&path).unwrap().write_all(data.as_bytes()).unwrap();
         let opts = Options { key: vec!["id".into()], ..Options::default() };
         let (h, r) = open(&path, &opts).unwrap();
-        sort_rows(&h, r, budget, dir.path())
+        sort_rows(&h, r, &Normalize::default(), budget, dir.path())
             .unwrap()
             .map(|r| {
                 let r = r.unwrap();

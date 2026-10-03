@@ -31,6 +31,7 @@ pub struct Options {
     /// Columns to leave out of the comparison.
     pub ignore: Vec<String>,
     pub delimiter: u8,
+    pub normalize: diff::Normalize,
     /// Approximate bytes of row data to hold in memory across both files.
     /// Past this, rows are sorted on disk.
     pub memory: usize,
@@ -44,6 +45,7 @@ impl Default for Options {
             key: Vec::new(),
             ignore: Vec::new(),
             delimiter: b',',
+            normalize: diff::Normalize::default(),
             memory: 512 << 20,
             tmp_dir: None,
         }
@@ -114,9 +116,10 @@ pub fn diff_files(a: &Path, b: &Path, opts: &Options, emit: impl FnMut(diff::Cha
     let (hb, rb) = open(b, opts)?;
     let columns = diff::ColumnMap::new(&ha, &hb, &opts.ignore);
     let half = (opts.memory / 2).max(1);
-    let sa = extsort::sort_rows(&ha, ra, half, &tmp)?;
-    let sb = extsort::sort_rows(&hb, rb, half, &tmp)?;
-    let summary = diff::merge_join(sa, sb, &columns, emit)?;
+    let n = &opts.normalize;
+    let sa = extsort::sort_rows(&ha, ra, n, half, &tmp)?;
+    let sb = extsort::sort_rows(&hb, rb, n, half, &tmp)?;
+    let summary = diff::merge_join(sa, sb, &columns, n, emit)?;
     Ok(Report { a: ha, b: hb, columns, summary })
 }
 

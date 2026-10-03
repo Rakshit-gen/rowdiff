@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use csv::StringRecord;
@@ -15,13 +16,37 @@ pub struct Rec {
 /// CSV data, so "a" + "bc" and "ab" + "c" can't collide.
 pub const KEY_SEP: char = '\u{1f}';
 
-pub fn make_key(row: &StringRecord, key_idx: &[usize]) -> String {
+/// How loosely two cells may match and still count as equal.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Normalize {
+    /// Ignore leading and trailing whitespace.
+    pub trim: bool,
+    /// Compare case-insensitively.
+    pub ignore_case: bool,
+}
+
+impl Normalize {
+    fn apply<'a>(&self, v: &'a str) -> Cow<'a, str> {
+        let v = if self.trim { v.trim() } else { v };
+        if self.ignore_case && v.chars().any(char::is_uppercase) {
+            Cow::Owned(v.to_lowercase())
+        } else {
+            Cow::Borrowed(v)
+        }
+    }
+
+    pub fn same(&self, a: &str, b: &str) -> bool {
+        a == b || self.apply(a) == self.apply(b)
+    }
+}
+
+pub fn make_key(row: &StringRecord, key_idx: &[usize], norm: &Normalize) -> String {
     let mut key = String::new();
     for (n, &i) in key_idx.iter().enumerate() {
         if n > 0 {
             key.push(KEY_SEP);
         }
-        key.push_str(row.get(i).unwrap_or(""));
+        key.push_str(&norm.apply(row.get(i).unwrap_or("")));
     }
     key
 }
@@ -131,7 +156,13 @@ impl<I: Iterator<Item = Result<Rec>>> Stream<I> {
 }
 
 /// Walk two key-sorted streams side by side.
-pub fn merge_join<A, B>(a: A, b: B, cols: &ColumnMap, mut emit: impl FnMut(Change)) -> Result<Summary>
+pub fn merge_join<A, B>(
+    a: A,
+    b: B,
+    cols: &ColumnMap,
+    norm: &Normalize,
+    mut emit: impl FnMut(Change),
+) -> Result<Summary>
 where
     A: IntoIterator<Item = Result<Rec>>,
     B: IntoIterator<Item = Result<Rec>>,
@@ -164,7 +195,7 @@ where
             }
             Ordering::Equal => {
                 let (ra, rb) = (x.take().unwrap(), y.take().unwrap());
-                let cells = compare(&ra.row, &rb.row, cols);
+                let cells = compare(&ra.row, &rb.row, cols, norm);
                 if cells.is_empty() {
                     s.unchanged += 1;
                 } else {
@@ -182,11 +213,11 @@ where
     Ok(s)
 }
 
-fn compare(a: &StringRecord, b: &StringRecord, cols: &ColumnMap) -> Vec<CellChange> {
+fn compare(a: &StringRecord, b: &StringRecord, cols: &ColumnMap, norm: &Normalize) -> Vec<CellChange> {
     let mut out = Vec::new();
     for (n, (ia, ib, _)) in cols.common.iter().enumerate() {
         let (va, vb) = (a.get(*ia).unwrap_or(""), b.get(*ib).unwrap_or(""));
-        if va != vb {
+        if !norm.same(va, vb) {
             out.push(CellChange { col: n, old: va.to_string(), new: vb.to_string() });
         }
     }
@@ -210,7 +241,7 @@ mod tests {
         rows.iter()
             .map(|r| {
                 let row = StringRecord::from(r.split(',').collect::<Vec<_>>());
-                Ok(Rec { key: make_key(&row, &h.key_idx), row })
+                Ok(Rec { key: make_key(&row, &h.key_idx, &Normalize::default()), row })
             })
             .collect()
     }
@@ -223,7 +254,7 @@ mod tests {
         let a = recs(&ha, &["1,pen,10", "2,cup,5", "3,mug,7"]);
         let b = recs(&hb, &["2,6,cup", "3,7,mug", "4,1,pad"]);
         let mut out = Vec::new();
-        let s = merge_join(a, b, &cols, |c| out.push(c)).unwrap();
+        let s = merge_join(a, b, &cols, &Normalize::default(), |c| out.push(c)).unwrap();
 
         assert_eq!((s.added, s.removed, s.changed, s.unchanged), (1, 1, 1, 1));
         assert!(matches!(&out[0], Change::Removed { key, .. } if key == "1"));
@@ -252,9 +283,26 @@ mod tests {
         let a = recs(&h, &["1,x", "1,y", "2,z"]);
         let b = recs(&h, &["1,x", "2,z"]);
         let mut out = Vec::new();
-        let s = merge_join(a, b, &cols, |c| out.push(c)).unwrap();
+        let s = merge_join(a, b, &cols, &Normalize::default(), |c| out.push(c)).unwrap();
         assert_eq!((s.rows_a, s.duplicates_a, s.changed, s.unchanged), (3, 1, 0, 2));
         assert!(matches!(&out[0], Change::Duplicate { side: Side::A, key, .. } if key == "1"));
+    }
+
+    #[test]
+    fn trim_and_case_apply_to_keys_and_cells() {
+        let h = header("id,name", "id");
+        let cols = ColumnMap::new(&h, &h, &[]);
+        let norm = Normalize { trim: true, ignore_case: true };
+        let mk = |rows: &[&str]| -> Vec<Result<Rec>> {
+            rows.iter()
+                .map(|r| {
+                    let row = StringRecord::from(r.split(',').collect::<Vec<_>>());
+                    Ok(Rec { key: make_key(&row, &h.key_idx, &norm), row })
+                })
+                .collect()
+        };
+        let s = merge_join(mk(&[" AB1 ,Pen "]), mk(&["ab1,pen"]), &cols, &norm, |_| {}).unwrap();
+        assert_eq!((s.unchanged, s.changed, s.added), (1, 0, 0));
     }
 
     #[test]
@@ -262,6 +310,7 @@ mod tests {
         let h = header("a,b", "a,b");
         let r1 = StringRecord::from(vec!["a", "bc"]);
         let r2 = StringRecord::from(vec!["ab", "c"]);
-        assert_ne!(make_key(&r1, &h.key_idx), make_key(&r2, &h.key_idx));
+        let n = Normalize::default();
+        assert_ne!(make_key(&r1, &h.key_idx, &n), make_key(&r2, &h.key_idx, &n));
     }
 }
