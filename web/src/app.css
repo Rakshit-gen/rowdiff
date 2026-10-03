@@ -334,9 +334,7 @@ code,
 
 .schema-note {
   margin-top: 16px;
-  padding: 12px 16px;
-  border-left: 3px solid var(--line-strong);
-  background: var(--surface);
+  color: var(--muted);
 }
 
 .schema-note p {
