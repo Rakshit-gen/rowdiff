@@ -172,10 +172,17 @@ impl Diff {
         let n = &self.opts.normalize;
         let size = |h: &Header| std::fs::metadata(&h.path).map(|m| m.len()).unwrap_or(0);
 
-        p.start(Phase::ReadingA, size(&self.a));
-        let (sa, rows_a) = extsort::sort_rows(&self.a, self.ra, n, half, &tmp, p)?;
-        p.start(Phase::ReadingB, size(&self.b));
-        let (sb, _) = extsort::sort_rows(&self.b, self.rb, n, half, &tmp, p)?;
+        // Each file gets half the budget, so sorting both at once stays
+        // within it and roughly halves the wall time on two or more cores.
+        p.start(Phase::Reading, size(&self.a) + size(&self.b));
+        let (ha, hb, ra, rb) = (&self.a, &self.b, self.ra, self.rb);
+        let (sorted_a, sorted_b) = std::thread::scope(|s| {
+            let worker = s.spawn(|| extsort::sort_rows(ha, ra, n, half, &tmp, p.counter(0)));
+            let b = extsort::sort_rows(hb, rb, n, half, &tmp, p.counter(1));
+            (worker.join().expect("sorting thread panicked"), b)
+        });
+        let (sa, rows_a) = sorted_a?;
+        let (sb, _) = sorted_b?;
         p.start(Phase::Comparing, rows_a);
         let summary = diff::merge_join(sa, sb, &self.columns, n, p, emit)?;
         p.start(Phase::Done, 0);

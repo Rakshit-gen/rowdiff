@@ -2,8 +2,7 @@ import type { Status } from "./api";
 
 const STEP: Record<string, string> = {
   starting: "Starting",
-  reading_a: "Reading and sorting the older file",
-  reading_b: "Reading and sorting the newer file",
+  reading: "Reading and sorting both files",
   comparing: "Comparing rows",
   done: "Finishing up",
 };
@@ -25,8 +24,11 @@ export function Running(props: { upload: number; status: Status | null }) {
     <section className="running" aria-live="polite">
       <div className="running-label">
         {label}
-        {status && status.phase !== "starting" && status.phase !== "done" && (
-          <span className="help"> ({status.phase === "reading_b" ? status.b.name : status.a.name})</span>
+        {status?.phase === "reading" && (
+          <span className="help">
+            {" "}
+            ({status.a.name} and {status.b.name})
+          </span>
         )}
       </div>
       <div className="bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>

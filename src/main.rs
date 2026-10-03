@@ -210,8 +210,7 @@ fn show_progress(p: &Progress, finished: &AtomicBool, a: &std::path::Path, b: &s
         let (phase, done, total) = p.snapshot();
         let pct = (done * 100).checked_div(total).unwrap_or(0);
         let line = match phase {
-            Phase::ReadingA => format!("reading {}  {pct}%", a.display()),
-            Phase::ReadingB => format!("reading {}  {pct}%", b.display()),
+            Phase::Reading => format!("reading {} and {}  {pct}%", a.display(), b.display()),
             Phase::Comparing => format!("comparing  {pct}%"),
             Phase::Starting | Phase::Done => continue,
         };

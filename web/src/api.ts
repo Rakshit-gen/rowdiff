@@ -1,6 +1,6 @@
 // Calls to rowdiff-web. Shapes mirror src/bin/web.rs and src/output.rs.
 
-export type Phase = "starting" | "reading_a" | "reading_b" | "comparing" | "done";
+export type Phase = "starting" | "reading" | "comparing" | "done";
 export type Kind = "added" | "removed" | "changed" | "duplicate";
 
 export interface Summary {

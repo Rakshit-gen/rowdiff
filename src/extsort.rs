@@ -7,8 +7,9 @@ use std::path::Path;
 use csv::StringRecord;
 
 use crate::diff::{Normalize, Rec, make_key};
-use crate::progress::{EVERY, Progress};
+use crate::progress::EVERY;
 use crate::{Error, Header, Result};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 /// Rows of one file in key order.
 pub enum Sorted {
@@ -47,7 +48,7 @@ pub fn sort_rows(
     norm: &Normalize,
     budget: usize,
     tmp: &Path,
-    progress: &Progress,
+    progress: &AtomicU64,
 ) -> Result<(Sorted, u64)> {
     let mut buf: Vec<Rec> = Vec::new();
     let mut used = 0;
@@ -60,7 +61,7 @@ pub fn sort_rows(
     {
         rows += 1;
         if rows.is_multiple_of(EVERY) {
-            progress.set(reader.position().byte());
+            progress.store(reader.position().byte(), Relaxed);
         }
         let row = std::mem::take(&mut row);
         let rec = Rec {
@@ -217,7 +218,7 @@ mod tests {
             &Normalize::default(),
             budget,
             dir.path(),
-            &Progress::default(),
+            &AtomicU64::new(0),
         )
         .unwrap()
         .0
