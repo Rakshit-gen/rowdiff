@@ -18,7 +18,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
 use rowdiff::diff::Change;
-use rowdiff::output::{change_json, summary_json};
+use rowdiff::output::{change_csv_rows, change_json, summary_json};
 use rowdiff::progress::Progress;
 use rowdiff::{Diff, Options, Report};
 use serde_json::{Value, json};
@@ -69,6 +69,8 @@ const KINDS: [&str; 4] = ["added", "removed", "changed", "duplicate"];
 struct Results {
     report: Report,
     file: PathBuf,
+    /// The same changes as `kind,key,column,old,new`, for download.
+    csv: PathBuf,
     /// Byte offset where each line starts, plus one past the last line.
     offsets: Vec<u64>,
     by_kind: [Vec<u32>; 4],
@@ -99,11 +101,14 @@ fn run_job(d: Diff, progress: &Progress, dir: &Path) -> anyhow::Result<Results> 
     use std::io::Write;
     let file = dir.join("changes.jsonl");
     let mut w = std::io::BufWriter::new(std::fs::File::create(&file)?);
+    let csv_path = dir.join("changes.csv");
+    let mut cw = csv::Writer::from_path(&csv_path)?;
+    cw.write_record(["kind", "key", "column", "old", "new"])?;
     let (a, b, cols) = (d.a.clone(), d.b.clone(), d.columns.clone());
     let mut offsets = vec![0u64];
     let mut by_kind: [Vec<u32>; 4] = Default::default();
     let mut by_column = vec![Vec::new(); cols.common.len()];
-    let mut failed = None;
+    let mut failed: Option<anyhow::Error> = None;
 
     let report = d.run_with(progress, |c| {
         if failed.is_some() {
@@ -122,20 +127,27 @@ fn run_job(d: Diff, progress: &Progress, dir: &Path) -> anyhow::Result<Results> 
             Change::Duplicate { .. } => 3,
         };
         by_kind[kind].push(n);
+        for row in change_csv_rows(&cols, &c) {
+            if let Err(e) = cw.write_record(&row) {
+                failed = Some(e.into());
+            }
+        }
         let mut line = change_json(&a, &b, &cols, &c).to_string();
         line.push('\n');
         if let Err(e) = w.write_all(line.as_bytes()) {
-            failed = Some(e);
+            failed = Some(e.into());
         }
         offsets.push(offsets[n as usize] + line.len() as u64);
     })?;
     if let Some(e) = failed {
-        return Err(e.into());
+        return Err(e);
     }
     w.flush()?;
+    cw.flush()?;
     Ok(Results {
         report,
         file,
+        csv: csv_path,
         offsets,
         by_kind,
         by_column,
@@ -383,6 +395,68 @@ async fn rows(
     ))
 }
 
+fn finished(job: &Job) -> Result<Arc<Results>, ApiError> {
+    match &*job.state.lock().unwrap() {
+        JobState::Done(r) => Ok(r.clone()),
+        JobState::Running => Err(ApiError(
+            StatusCode::CONFLICT,
+            "this diff is still running".into(),
+        )),
+        JobState::Failed(e) => Err(ApiError(StatusCode::CONFLICT, e.clone())),
+    }
+}
+
+/// Every change as CSV, named after the two files.
+async fn export(
+    State(app): State<Arc<App>>,
+    UrlPath(id): UrlPath<u64>,
+) -> Result<Response, ApiError> {
+    let job = find(&app, id)?;
+    let r = finished(&job)?;
+    let file = tokio::fs::File::open(&r.csv).await.map_err(internal)?;
+    let stem = |n: &str| {
+        Path::new(n)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file")
+            .replace('"', "")
+    };
+    let name = format!("{}-vs-{}.csv", stem(&job.name_a), stem(&job.name_b));
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file));
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/csv; charset=utf-8".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{name}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Forget a diff and delete its uploaded files and results.
+async fn remove(
+    State(app): State<Arc<App>>,
+    UrlPath(id): UrlPath<u64>,
+) -> Result<StatusCode, ApiError> {
+    let job = find(&app, id)?;
+    if matches!(*job.state.lock().unwrap(), JobState::Running) {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "wait for this diff to finish before deleting it".into(),
+        ));
+    }
+    app.jobs.lock().unwrap().remove(&id);
+    let dir = app.dir.path().join(id.to_string());
+    tokio::fs::remove_dir_all(dir).await.map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -396,7 +470,8 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/diffs", post(create))
-        .route("/api/diffs/{id}", get(status))
+        .route("/api/diffs/{id}", get(status).delete(remove))
+        .route("/api/diffs/{id}/changes.csv", get(export))
         .route("/api/diffs/{id}/rows", get(rows))
         .layer(DefaultBodyLimit::max(cli.max_upload_mb << 20))
         .with_state(state)
