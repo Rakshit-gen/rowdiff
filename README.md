@@ -84,6 +84,9 @@ script.
 opens in any spreadsheet. `-f jsonl` prints one object per changed row with
 the full row and ends with a summary line.
 
+Gzipped files (`export.csv.gz`) are read as they are; rowdiff spots gzip by
+its first bytes, not the file name.
+
 Columns are matched by name, so reordering columns is not a change. A column
 that exists in only one file is reported once at the top and left out of the
 comparison. If a key appears more than once in a file, the first row is used
