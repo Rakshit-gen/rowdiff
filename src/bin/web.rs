@@ -11,13 +11,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{DefaultBodyLimit, Multipart, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path as UrlPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
-use rowdiff::{Diff, Options};
+use rowdiff::output::summary_json;
+use rowdiff::progress::Progress;
+use rowdiff::{Diff, Options, Report};
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tower_http::services::{ServeDir, ServeFile};
@@ -45,6 +47,16 @@ struct App {
 struct Job {
     name_a: String,
     name_b: String,
+    columns_a: Vec<String>,
+    columns_b: Vec<String>,
+    progress: Progress,
+    state: Mutex<JobState>,
+}
+
+enum JobState {
+    Running,
+    Failed(String),
+    Done(Report),
 }
 
 /// An error the browser can show as is.
@@ -76,7 +88,10 @@ fn clean_name(raw: Option<&str>, fallback: &str) -> String {
 
 /// Accept two files and options as multipart form fields, check that the
 /// key columns exist, and start the diff.
-async fn create(State(app): State<Arc<App>>, mut form: Multipart) -> Result<(StatusCode, Json<Value>), ApiError> {
+async fn create(
+    State(app): State<Arc<App>>,
+    mut form: Multipart,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     let id = app.next.fetch_add(1, Ordering::Relaxed);
     let dir = app.dir.path().join(id.to_string());
     let mut opts = Options::default();
@@ -87,9 +102,12 @@ async fn create(State(app): State<Arc<App>>, mut form: Multipart) -> Result<(Sta
         match name.as_str() {
             "a" | "b" => {
                 let slot = usize::from(name == "b");
-                let shown = clean_name(field.file_name(), if slot == 0 { "a.csv" } else { "b.csv" });
+                let shown =
+                    clean_name(field.file_name(), if slot == 0 { "a.csv" } else { "b.csv" });
                 let side_dir = dir.join(&name);
-                tokio::fs::create_dir_all(&side_dir).await.map_err(internal)?;
+                tokio::fs::create_dir_all(&side_dir)
+                    .await
+                    .map_err(internal)?;
                 let path = side_dir.join(&shown);
                 let mut out = tokio::fs::File::create(&path).await.map_err(internal)?;
                 while let Some(chunk) = field.chunk().await.map_err(|e| bad(e.body_text()))? {
@@ -106,7 +124,9 @@ async fn create(State(app): State<Arc<App>>, mut form: Multipart) -> Result<(Sta
                     "trim" => opts.normalize.trim = v == "true",
                     "ignore_case" => opts.normalize.ignore_case = v == "true",
                     "tolerance" if !v.is_empty() => {
-                        let t = v.parse().map_err(|_| bad(format!("tolerance {v:?} is not a number")))?;
+                        let t = v
+                            .parse()
+                            .map_err(|_| bad(format!("tolerance {v:?} is not a number")))?;
                         opts.normalize.tolerance = Some(t);
                     }
                     "delimiter" => match v.as_bytes() {
@@ -141,19 +161,80 @@ async fn create(State(app): State<Arc<App>>, mut form: Multipart) -> Result<(Sta
         bad(msg)
     })?;
 
-    let body = json!({
-        "id": id,
-        "a": { "name": name_a, "columns": d.a.columns },
-        "b": { "name": name_b, "columns": d.b.columns },
+    let job = Arc::new(Job {
+        name_a,
+        name_b,
+        columns_a: d.a.columns.clone(),
+        columns_b: d.b.columns.clone(),
+        progress: Progress::default(),
+        state: Mutex::new(JobState::Running),
     });
-    app.jobs.lock().unwrap().insert(id, Arc::new(Job { name_a, name_b }));
+    app.jobs.lock().unwrap().insert(id, job.clone());
+    let body = status_json(id, &job);
+
+    tokio::task::spawn_blocking(move || {
+        let result = d.run_with(&job.progress, |_| {});
+        *job.state.lock().unwrap() = match result {
+            Ok(report) => JobState::Done(report),
+            Err(e) => JobState::Failed(e.to_string()),
+        };
+    });
     Ok((StatusCode::CREATED, Json(body)))
+}
+
+fn status_json(id: u64, job: &Job) -> Value {
+    let (phase, done, total) = job.progress.snapshot();
+    let mut v = json!({
+        "id": id,
+        "a": { "name": job.name_a, "columns": job.columns_a },
+        "b": { "name": job.name_b, "columns": job.columns_b },
+        "phase": phase,
+        "done": done,
+        "total": total,
+    });
+    match &*job.state.lock().unwrap() {
+        JobState::Running => v["status"] = "running".into(),
+        JobState::Failed(e) => {
+            v["status"] = "failed".into();
+            v["error"] = e.as_str().into();
+        }
+        JobState::Done(r) => {
+            v["status"] = "done".into();
+            v["summary"] = summary_json(&r.columns, &r.summary);
+            v["compared_columns"] = r
+                .columns
+                .common
+                .iter()
+                .map(|c| c.2.clone())
+                .collect::<Vec<_>>()
+                .into();
+        }
+    }
+    v
+}
+
+fn find(app: &App, id: u64) -> Result<Arc<Job>, ApiError> {
+    app.jobs.lock().unwrap().get(&id).cloned().ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            format!("no diff with id {id}, it may have been deleted"),
+        )
+    })
+}
+
+async fn status(
+    State(app): State<Arc<App>>,
+    UrlPath(id): UrlPath<u64>,
+) -> Result<Json<Value>, ApiError> {
+    let job = find(&app, id)?;
+    Ok(Json(status_json(id, &job)))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let ui = ServeDir::new(&cli.static_dir).fallback(ServeFile::new(cli.static_dir.join("index.html")));
+    let ui =
+        ServeDir::new(&cli.static_dir).fallback(ServeFile::new(cli.static_dir.join("index.html")));
     let state = Arc::new(App {
         dir: tempfile::Builder::new().prefix("rowdiff-web-").tempdir()?,
         next: AtomicU64::new(1),
@@ -162,6 +243,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/diffs", post(create))
+        .route("/api/diffs/{id}", get(status))
         .layer(DefaultBodyLimit::max(cli.max_upload_mb << 20))
         .with_state(state)
         .fallback_service(ui);

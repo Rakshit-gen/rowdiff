@@ -3,7 +3,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::Header;
-use crate::diff::{Change, ColumnMap, KEY_SEP, Side};
+use crate::diff::{Change, ColumnMap, KEY_SEP, Side, Summary};
 
 pub fn key_parts(key: &str) -> Vec<&str> {
     key.split(KEY_SEP).collect()
@@ -88,4 +88,22 @@ pub fn change_csv_rows(cols: &ColumnMap, c: &Change) -> Vec<[String; 5]> {
             })
             .collect(),
     }
+}
+
+/// Totals for a finished diff, including changed-row counts per column in
+/// the order the columns appear in the first file.
+pub fn summary_json(cols: &ColumnMap, s: &Summary) -> Value {
+    let per_column: Map<String, Value> = cols
+        .common
+        .iter()
+        .zip(&s.per_column)
+        .map(|((_, _, name), n)| (name.clone(), (*n).into()))
+        .collect();
+    json!({
+        "rows_a": s.rows_a, "rows_b": s.rows_b,
+        "added": s.added, "removed": s.removed, "changed": s.changed, "unchanged": s.unchanged,
+        "duplicates_a": s.duplicates_a, "duplicates_b": s.duplicates_b,
+        "only_in_a": cols.only_a, "only_in_b": cols.only_b,
+        "changed_by_column": per_column,
+    })
 }

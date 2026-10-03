@@ -25,8 +25,18 @@ impl Rng {
 }
 
 const NAMES: [&str; 12] = [
-    "Desk lamp", "Notebook, A5", "Steel bottle", "USB-C cable", "Wool socks", "Coffee grinder",
-    "Phone stand", "Linen shirt", "Chef's knife", "Yoga mat", "Rain jacket", "Backpack, 20L",
+    "Desk lamp",
+    "Notebook, A5",
+    "Steel bottle",
+    "USB-C cable",
+    "Wool socks",
+    "Coffee grinder",
+    "Phone stand",
+    "Linen shirt",
+    "Chef's knife",
+    "Yoga mat",
+    "Rain jacket",
+    "Backpack, 20L",
 ];
 const CATEGORIES: [&str; 5] = ["home", "office", "kitchen", "apparel", "outdoor"];
 
@@ -50,8 +60,21 @@ fn product(i: u64) -> Product {
 }
 
 fn write(w: &mut impl Write, p: &Product) -> std::io::Result<()> {
-    let name = if p.name.contains(',') { format!("\"{}\"", p.name) } else { p.name.to_string() };
-    writeln!(w, "{},{},{},{}.{:02},{}", p.sku, name, p.category, p.price_cents / 100, p.price_cents % 100, p.stock)
+    let name = if p.name.contains(',') {
+        format!("\"{}\"", p.name)
+    } else {
+        p.name.to_string()
+    };
+    writeln!(
+        w,
+        "{},{},{},{}.{:02},{}",
+        p.sku,
+        name,
+        p.category,
+        p.price_cents / 100,
+        p.price_cents % 100,
+        p.stock
+    )
 }
 
 fn main() -> std::io::Result<()> {

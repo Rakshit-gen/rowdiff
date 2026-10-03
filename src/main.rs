@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use clap::{Parser, ValueEnum};
 use rowdiff::diff::{Change, KEY_SEP, Normalize, Side};
-use rowdiff::output::{change_csv_rows, change_json};
+use rowdiff::output::{change_csv_rows, change_json, summary_json};
 use rowdiff::progress::{Phase, Progress};
 use rowdiff::{Diff, Options, Report};
 
@@ -166,25 +166,9 @@ fn jsonl(d: Diff, p: &Progress) -> Result<Report> {
     if let Some(e) = err {
         return Err(e.into());
     }
-    let s = &report.summary;
-    let per_column: serde_json::Map<_, _> = cols
-        .common
-        .iter()
-        .zip(&s.per_column)
-        .map(|((_, _, name), n)| (name.clone(), (*n).into()))
-        .collect();
-    writeln!(
-        out,
-        "{}",
-        serde_json::json!({
-            "kind": "summary",
-            "rows_a": s.rows_a, "rows_b": s.rows_b,
-            "added": s.added, "removed": s.removed, "changed": s.changed, "unchanged": s.unchanged,
-            "duplicates_a": s.duplicates_a, "duplicates_b": s.duplicates_b,
-            "only_in_a": cols.only_a, "only_in_b": cols.only_b,
-            "changed_by_column": per_column,
-        })
-    )?;
+    let mut summary = summary_json(&cols, &report.summary);
+    summary["kind"] = "summary".into();
+    writeln!(out, "{summary}")?;
     out.flush()?;
     Ok(report)
 }
