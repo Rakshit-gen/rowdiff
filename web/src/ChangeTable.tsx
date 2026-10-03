@@ -22,7 +22,10 @@ export function ChangeTable(props: { status: Status; filter: RowFilter; total: n
   const { status, filter, total } = props;
   const { id, key: keyCols } = status;
   const columns = status.compared_columns ?? [];
-  const [open, setOpen] = useState<Change | null>(null);
+  // Roving focus: one row is in the tab order, the arrow keys move it.
+  const [active, setActive] = useState(0);
+  const [open, setOpen] = useState<number | null>(null);
+  const focusAfterMove = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(560);
@@ -59,13 +62,57 @@ export function ChangeTable(props: { status: Status; filter: RowFilter; total: n
     }
   }, [first, last, pages, load]);
 
+  const at = (i: number) => pages.get(Math.floor(i / PAGE))?.[i % PAGE];
+
+  /** Make row `i` the active one and scroll it into view below the sticky header. */
+  const moveTo = (i: number, focus: boolean) => {
+    const next = Math.max(0, Math.min(total - 1, i));
+    const el = scroller.current;
+    if (el) {
+      const top = next * ROW;
+      if (top < el.scrollTop) el.scrollTop = top;
+      else if (top + ROW > el.scrollTop + el.clientHeight - ROW) el.scrollTop = top + 2 * ROW - el.clientHeight;
+    }
+    focusAfterMove.current = focus;
+    setActive(next);
+    return next;
+  };
+
+  useEffect(() => {
+    if (!focusAfterMove.current) return;
+    focusAfterMove.current = false;
+    scroller.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.focus({ preventScroll: true });
+  }, [active, pages]);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step: Record<string, number> = { ArrowDown: 1, j: 1, ArrowUp: -1, k: -1, PageDown: 10, PageUp: -10 };
+    if (e.key in step) moveTo(active + step[e.key]!, true);
+    else if (e.key === "Home") moveTo(0, true);
+    else if (e.key === "End") moveTo(total - 1, true);
+    else if (e.key === "Enter" && at(active)) setOpen(active);
+    else return;
+    e.preventDefault();
+  };
+
   const cols = [...keyCols, ...columns];
   const template = `2.25rem repeat(${cols.length}, minmax(9rem, 1fr))`;
   const rows = [];
   for (let i = first; i < last; i++) {
-    const c = pages.get(Math.floor(i / PAGE))?.[i % PAGE];
     rows.push(
-      <Row key={i} index={i} change={c} cols={cols} keyCount={keyCols.length} template={template} onOpen={setOpen} />,
+      <Row
+        key={i}
+        index={i}
+        active={i === active}
+        change={at(i)}
+        cols={cols}
+        keyCount={keyCols.length}
+        template={template}
+        onOpen={() => {
+          setActive(i);
+          setOpen(i);
+        }}
+        onFocus={() => setActive(i)}
+      />,
     );
   }
 
@@ -73,7 +120,16 @@ export function ChangeTable(props: { status: Status; filter: RowFilter; total: n
 
   return (
     <div className="table" role="table" aria-rowcount={total + 1}>
-      <div className="table-scroll" ref={scroller} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+      <div
+        className="table-scroll"
+        ref={scroller}
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        onKeyDown={onKeyDown}
+        // When the active row has scrolled out of the DOM, the scroller itself
+        // takes the tab stop so the keys still work.
+        tabIndex={active < first || active >= last ? 0 : -1}
+        aria-label="Changes"
+      >
         <div className="tr th" role="row" style={{ gridTemplateColumns: template }}>
           <span role="columnheader" className="td mark">
             <span className="visually-hidden">Change</span>
@@ -87,18 +143,32 @@ export function ChangeTable(props: { status: Status; filter: RowFilter; total: n
         <div style={{ height: total * ROW, position: "relative" }}>{rows}</div>
       </div>
       {error && <p className="error">{error}</p>}
-      {open && <RowDetail change={open} status={status} onClose={() => setOpen(null)} />}
+      {open !== null && (
+        <RowDetail
+          change={at(open)}
+          index={open}
+          total={total}
+          status={status}
+          onStep={(d) => setOpen(moveTo(open + d, false))}
+          onClose={() => {
+            setOpen(null);
+            moveTo(active, true);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function Row(props: {
   index: number;
+  active: boolean;
   change: Change | undefined;
   cols: string[];
   keyCount: number;
   template: string;
-  onOpen: (c: Change) => void;
+  onOpen: () => void;
+  onFocus: () => void;
 }) {
   const { change: c, cols, keyCount } = props;
   const style = { top: props.index * ROW, height: ROW, gridTemplateColumns: props.template };
@@ -114,11 +184,12 @@ function Row(props: {
     <div
       className={`tr row-${c.kind} clickable`}
       role="row"
-      tabIndex={0}
+      data-i={props.index}
+      tabIndex={props.active ? 0 : -1}
       aria-rowindex={props.index + 2}
       style={style}
-      onClick={() => props.onOpen(c)}
-      onKeyDown={(e) => e.key === "Enter" && props.onOpen(c)}
+      onClick={props.onOpen}
+      onFocus={props.onFocus}
     >
       <span className="td mark" role="cell" title={MARK_LABEL[c.kind]}>
         <span aria-hidden>{MARK[c.kind]}</span>

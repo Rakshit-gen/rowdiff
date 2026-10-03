@@ -110,7 +110,10 @@ export function Results(props: { status: Status; onReset: () => void }) {
             filter={filter}
             total={filter.column ? (s.changed_by_column[filter.column] ?? 0) : counts[filter.kind ?? "all"]}
           />
-          <p className="help">Click a row, or press Enter on it, to see every column side by side.</p>
+          <p className="help">
+            Click a row, or move with the arrow keys or j and k and press Enter, to see every column side by side.
+            The same keys step through rows there.
+          </p>
         </div>
       </div>
     </section>

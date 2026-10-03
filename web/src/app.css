@@ -703,8 +703,45 @@ button.split-part:hover,
   max-height: calc(100vh - 64px);
 }
 
+.detail[open] {
+  animation: rise 180ms var(--ease-out);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
 .detail::backdrop {
   background: rgb(0 0 0 / 0.35);
+}
+
+.detail[open]::backdrop {
+  animation: fade 180ms;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.detail-table {
+  animation: fade 140ms;
+}
+
+.detail-actions,
+.detail-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-nav {
+  justify-content: space-between;
+  margin-top: 14px;
 }
 
 .detail-head {
