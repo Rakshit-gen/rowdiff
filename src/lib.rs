@@ -31,11 +31,22 @@ pub struct Options {
     /// Columns to leave out of the comparison.
     pub ignore: Vec<String>,
     pub delimiter: u8,
+    /// Approximate bytes of row data to hold in memory across both files.
+    /// Past this, rows are sorted on disk.
+    pub memory: usize,
+    /// Where sorted runs go. Defaults to the system temp directory.
+    pub tmp_dir: Option<PathBuf>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { key: Vec::new(), ignore: Vec::new(), delimiter: b',' }
+        Options {
+            key: Vec::new(),
+            ignore: Vec::new(),
+            delimiter: b',',
+            memory: 512 << 20,
+            tmp_dir: None,
+        }
     }
 }
 
@@ -87,6 +98,28 @@ pub fn open(path: &Path, opts: &Options) -> Result<(Header, csv::Reader<File>)> 
     Ok((header, reader))
 }
 
+/// What a diff found, apart from the per-row changes handed to `emit`.
+#[derive(Debug, Clone)]
+pub struct Report {
+    pub a: Header,
+    pub b: Header,
+    pub columns: diff::ColumnMap,
+    pub summary: diff::Summary,
+}
+
+/// Diff two CSV files by `opts.key`, calling `emit` for every row that differs.
+pub fn diff_files(a: &Path, b: &Path, opts: &Options, emit: impl FnMut(diff::Change)) -> Result<Report> {
+    let tmp = opts.tmp_dir.clone().unwrap_or_else(std::env::temp_dir);
+    let (ha, ra) = open(a, opts)?;
+    let (hb, rb) = open(b, opts)?;
+    let columns = diff::ColumnMap::new(&ha, &hb, &opts.ignore);
+    let half = (opts.memory / 2).max(1);
+    let sa = extsort::sort_rows(&ha, ra, half, &tmp)?;
+    let sb = extsort::sort_rows(&hb, rb, half, &tmp)?;
+    let summary = diff::merge_join(sa, sb, &columns, emit)?;
+    Ok(Report { a: ha, b: hb, columns, summary })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +132,27 @@ mod tests {
     fn finds_key_columns_by_name() {
         let h = Header::new("a.csv".into(), cols("id,name,region"), &cols("region,id")).unwrap();
         assert_eq!(h.key_idx, vec![2, 0]);
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[test]
+    fn diffs_two_files_the_same_way_in_memory_and_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = write(dir.path(), "a.csv", "sku,qty,price\nb2,1,9.50\na1,4,2.00\nc3,7,1.25\n");
+        let b = write(dir.path(), "b.csv", "sku,price,qty\na1,2.00,5\nc3,1.25,7\nd4,3.00,1\n");
+        for memory in [usize::MAX, 1] {
+            let opts = Options { key: vec!["sku".into()], memory, ..Options::default() };
+            let mut changes = Vec::new();
+            let r = diff_files(&a, &b, &opts, |c| changes.push(c)).unwrap();
+            let s = &r.summary;
+            assert_eq!((s.added, s.removed, s.changed, s.unchanged), (1, 1, 1, 1), "memory={memory}");
+            assert_eq!(changes.len(), 3);
+        }
     }
 
     #[test]
