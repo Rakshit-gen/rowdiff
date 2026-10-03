@@ -200,6 +200,24 @@ h1 {
   margin-bottom: 8px;
 }
 
+/* Browsers that can animate to auto height open the options smoothly;
+   the rest just open them. */
+.options {
+  interpolate-size: allow-keywords;
+}
+
+.options::details-content {
+  height: 0;
+  overflow: clip;
+  transition:
+    height 220ms var(--ease-out),
+    content-visibility 220ms allow-discrete;
+}
+
+.options[open]::details-content {
+  height: auto;
+}
+
 .field-sub {
   margin-top: 16px;
 }
