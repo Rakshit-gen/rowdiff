@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::Parser;
@@ -56,7 +57,20 @@ fn show_key(k: &str) -> String {
     k.replace(KEY_SEP, ", ")
 }
 
-fn main() -> Result<()> {
+/// Same convention as diff(1): 0 when the files match, 1 when they differ,
+/// 2 when something went wrong.
+fn main() -> ExitCode {
+    match run() {
+        Ok(false) => ExitCode::SUCCESS,
+        Ok(true) => ExitCode::from(1),
+        Err(e) => {
+            eprintln!("rowdiff: {e:#}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<bool> {
     let cli = Cli::parse();
     let opts = Options {
         key: cli.key,
@@ -87,7 +101,8 @@ fn main() -> Result<()> {
     if hidden > 0 {
         writeln!(out, "... and {hidden} more. Raise --limit to see them.")?;
     }
-    Ok(())
+    let s = &report.summary;
+    Ok(s.added + s.removed + s.changed + s.duplicates_a + s.duplicates_b > 0)
 }
 
 fn print_summary(out: &mut impl Write, r: &Report) -> std::io::Result<()> {
