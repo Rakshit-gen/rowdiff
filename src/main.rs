@@ -1,11 +1,14 @@
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use clap::{Parser, ValueEnum};
 use rowdiff::diff::{Change, KEY_SEP, Normalize, Side};
 use rowdiff::output::{change_csv_rows, change_json};
+use rowdiff::progress::{Phase, Progress};
 use rowdiff::{Diff, Options, Report};
 
 /// Compare two CSV exports by key.
@@ -106,19 +109,28 @@ fn run() -> Result<bool> {
     };
 
     let d = Diff::prepare(&cli.a, &cli.b, &opts)?;
-    let report = match cli.format {
-        Format::Text => text(d, cli.limit)?,
-        Format::Jsonl => jsonl(d)?,
-        Format::Csv => csv_out(d)?,
-    };
+    let p = Progress::default();
+    let finished = AtomicBool::new(false);
+    let report = std::thread::scope(|scope| {
+        if std::io::stderr().is_terminal() {
+            scope.spawn(|| show_progress(&p, &finished, &cli.a, &cli.b));
+        }
+        let r = match cli.format {
+            Format::Text => text(d, &p, cli.limit),
+            Format::Jsonl => jsonl(d, &p),
+            Format::Csv => csv_out(d, &p),
+        };
+        finished.store(true, Ordering::Relaxed);
+        r
+    })?;
     let s = &report.summary;
     Ok(s.added + s.removed + s.changed + s.duplicates_a + s.duplicates_b > 0)
 }
 
-fn text(d: Diff, limit: usize) -> Result<Report> {
+fn text(d: Diff, p: &Progress, limit: usize) -> Result<Report> {
     let mut shown = Vec::new();
     let mut hidden = 0u64;
-    let report = d.run(|c| {
+    let report = d.run_with(p, |c| {
         if shown.len() < limit {
             shown.push(c);
         } else {
@@ -140,11 +152,11 @@ fn text(d: Diff, limit: usize) -> Result<Report> {
 }
 
 /// Every change as one JSON object per line, then a summary line.
-fn jsonl(d: Diff) -> Result<Report> {
+fn jsonl(d: Diff, p: &Progress) -> Result<Report> {
     let (a, b, cols) = (d.a.clone(), d.b.clone(), d.columns.clone());
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     let mut err = None;
-    let report = d.run(|c| {
+    let report = d.run_with(p, |c| {
         if err.is_none()
             && let Err(e) = writeln!(out, "{}", change_json(&a, &b, &cols, &c))
         {
@@ -178,12 +190,12 @@ fn jsonl(d: Diff) -> Result<Report> {
 }
 
 /// Every change as `kind,key,column,old,new`, one line per changed cell.
-fn csv_out(d: Diff) -> Result<Report> {
+fn csv_out(d: Diff, p: &Progress) -> Result<Report> {
     let cols = d.columns.clone();
     let mut w = csv::Writer::from_writer(std::io::stdout().lock());
     w.write_record(["kind", "key", "column", "old", "new"])?;
     let mut err = None;
-    let report = d.run(|c| {
+    let report = d.run_with(p, |c| {
         for row in change_csv_rows(&cols, &c) {
             if err.is_none()
                 && let Err(e) = w.write_record(&row)
@@ -197,6 +209,34 @@ fn csv_out(d: Diff) -> Result<Report> {
     }
     w.flush()?;
     Ok(report)
+}
+
+/// A one-line progress readout on stderr, redrawn in place. Stays quiet for
+/// the first half second so small diffs don't flash it.
+fn show_progress(p: &Progress, finished: &AtomicBool, a: &std::path::Path, b: &std::path::Path) {
+    let mut waited = Duration::ZERO;
+    let tick = Duration::from_millis(100);
+    let mut drew = false;
+    while !finished.load(Ordering::Relaxed) {
+        std::thread::sleep(tick);
+        waited += tick;
+        if waited < Duration::from_millis(500) {
+            continue;
+        }
+        let (phase, done, total) = p.snapshot();
+        let pct = if total > 0 { done * 100 / total } else { 0 };
+        let line = match phase {
+            Phase::ReadingA => format!("reading {}  {pct}%", a.display()),
+            Phase::ReadingB => format!("reading {}  {pct}%", b.display()),
+            Phase::Comparing => format!("comparing  {pct}%"),
+            Phase::Starting | Phase::Done => continue,
+        };
+        eprint!("\r\x1b[2K{line}");
+        drew = true;
+    }
+    if drew {
+        eprint!("\r\x1b[2K");
+    }
 }
 
 fn print_summary(out: &mut impl Write, r: &Report) -> std::io::Result<()> {

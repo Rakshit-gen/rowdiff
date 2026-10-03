@@ -59,7 +59,7 @@ pub fn sort_rows(
         .map_err(|e| csv_err(&header.path, e))?
     {
         rows += 1;
-        if rows % EVERY == 0 {
+        if rows.is_multiple_of(EVERY) {
             progress.set(reader.position().byte());
         }
         let row = std::mem::take(&mut row);

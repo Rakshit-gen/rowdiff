@@ -172,7 +172,7 @@ impl<I: Iterator<Item = Result<Rec>>> Stream<'_, I> {
                 Side::A => s.rows_a += 1,
                 Side::B => s.rows_b += 1,
             }
-            if self.side == Side::A && s.rows_a % EVERY == 0 {
+            if self.side == Side::A && s.rows_a.is_multiple_of(EVERY) {
                 self.progress.set(s.rows_a);
             }
             if self.last.as_deref() == Some(r.key.as_str()) {
