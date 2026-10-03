@@ -54,9 +54,25 @@ export interface FileHeader {
   delimiter: string;
 }
 
+/** The first `max` characters of a file, decompressing it first if it is gzip. */
+async function head(file: Blob, max: number): Promise<string> {
+  const magic = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  if (magic[0] !== 0x1f || magic[1] !== 0x8b) return file.slice(0, max).text();
+  const reader = file.stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (text.length < max) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+  return text.slice(0, max);
+}
+
 /** Read the header of a picked file from its first 64 KB. */
-export async function readHeader(file: File): Promise<FileHeader> {
-  const text = await file.slice(0, 64 * 1024).text();
+export async function readHeader(file: Blob): Promise<FileHeader> {
+  const text = await head(file, 64 * 1024);
   const delimiter = sniffDelimiter(text);
   return { columns: parseHeader(text, delimiter), delimiter };
 }

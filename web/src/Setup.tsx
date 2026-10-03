@@ -55,7 +55,7 @@ function FileSlot(props: {
         id={id}
         className="visually-hidden"
         type="file"
-        accept=".csv,.tsv,.txt,text/csv"
+        accept=".csv,.tsv,.txt,.gz,text/csv,application/gzip"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) props.onFile(f);
