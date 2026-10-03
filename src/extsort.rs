@@ -87,9 +87,9 @@ pub fn sort_rows(
 /// Write a sorted run as CSV: key first, then the row's fields.
 fn spill(buf: &mut Vec<Rec>, tmp: &Path) -> Result<File> {
     buf.sort_by(|a, b| a.key.cmp(&b.key));
-    let io = |source| Error::Io {
+    let io = |err| Error::Io {
         path: tmp.to_path_buf(),
-        source,
+        err,
     };
     let mut file = tempfile::tempfile_in(tmp).map_err(io)?;
     {
@@ -180,10 +180,16 @@ impl Merge {
     }
 }
 
-pub(crate) fn csv_err(path: &Path, source: csv::Error) -> Error {
+pub(crate) fn csv_err(path: &Path, err: csv::Error) -> Error {
+    if let csv::ErrorKind::Utf8 { pos: Some(pos), .. } = err.kind() {
+        return Error::NotUtf8 {
+            path: path.to_path_buf(),
+            line: pos.line(),
+        };
+    }
     Error::Csv {
         path: path.to_path_buf(),
-        source,
+        err,
     }
 }
 

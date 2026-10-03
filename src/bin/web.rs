@@ -225,6 +225,14 @@ fn clean_name(raw: Option<&str>, fallback: &str) -> String {
         .to_string()
 }
 
+/// Swap the server's paths for the file names the user picked, so messages
+/// talk about "orders.csv", not where the server keeps it.
+fn shown_names(msg: &str, files: [(&Path, &str); 2]) -> String {
+    files.iter().fold(msg.to_string(), |m, (path, name)| {
+        m.replace(&path.display().to_string(), name)
+    })
+}
+
 /// Accept two files and options as multipart form fields, check that the
 /// key columns exist, and start the diff.
 async fn create(
@@ -292,12 +300,10 @@ async fn create(
         .await
         .map_err(internal)?;
     let d = prepared.map_err(|e| {
-        // Show the names the user picked, not where the server keeps them.
-        let msg = e
-            .to_string()
-            .replace(&path_a.display().to_string(), &name_a)
-            .replace(&path_b.display().to_string(), &name_b);
-        bad(msg)
+        bad(shown_names(
+            &e.to_string(),
+            [(&path_a, &name_a), (&path_b, &name_b)],
+        ))
     })?;
 
     let job = Arc::new(Job {
@@ -316,7 +322,10 @@ async fn create(
         let result = run_job(d, &job.progress, &dir);
         *job.state.lock().unwrap() = match result {
             Ok(r) => JobState::Done(Arc::new(r)),
-            Err(e) => JobState::Failed(format!("{e:#}")),
+            Err(e) => JobState::Failed(shown_names(
+                &format!("{e:#}"),
+                [(&path_a, &job.name_a), (&path_b, &job.name_b)],
+            )),
         };
     });
     Ok((StatusCode::CREATED, Json(body)))

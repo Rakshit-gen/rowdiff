@@ -14,13 +14,17 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{path}: {source}")]
-    Csv { path: PathBuf, source: csv::Error },
-    #[error("{path}: {source}")]
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
+    // The inner errors are named `err`, not `source`, so they print once in
+    // the message rather than again as a cause.
+    #[error("{path}: {err}")]
+    Csv { path: PathBuf, err: csv::Error },
+    #[error("{path}: {err}")]
+    Io { path: PathBuf, err: std::io::Error },
+    #[error(
+        "{path}: line {line} isn't valid UTF-8. rowdiff only reads UTF-8. If the file came from Excel, \
+         save it again as \"CSV UTF-8 (Comma delimited)\"."
+    )]
+    NotUtf8 { path: PathBuf, line: u64 },
     #[error("{path}: no column named {column:?} (columns are: {available})")]
     MissingKey {
         path: PathBuf,
@@ -98,9 +102,9 @@ impl Header {
 /// Open a CSV file and read its header. Ragged rows are allowed; a missing
 /// trailing cell reads as empty.
 pub fn open(path: &Path, opts: &Options) -> Result<(Header, csv::Reader<File>)> {
-    let file = File::open(path).map_err(|source| Error::Io {
+    let file = File::open(path).map_err(|err| Error::Io {
         path: path.to_path_buf(),
-        source,
+        err,
     })?;
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(opts.delimiter)
@@ -243,6 +247,19 @@ mod tests {
             );
             assert_eq!(changes.len(), 3);
         }
+    }
+
+    #[test]
+    fn latin1_files_get_a_fix_not_a_parse_dump() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x.csv");
+        std::fs::write(&p, b"id,city\n1,M\xfcnchen\n").unwrap();
+        let opts = Options {
+            key: vec!["id".into()],
+            ..Options::default()
+        };
+        let err = diff_files(&p, &p, &opts, |_| {}).unwrap_err().to_string();
+        assert!(err.ends_with("line 2 isn't valid UTF-8. rowdiff only reads UTF-8. If the file came from Excel, save it again as \"CSV UTF-8 (Comma delimited)\"."), "{err}");
     }
 
     #[test]
