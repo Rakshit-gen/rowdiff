@@ -5,6 +5,11 @@
 //! Binds to 127.0.0.1 by default. Uploaded files and results live in a temp
 //! directory that is removed when the server stops.
 
+// The default macOS and glibc allocators serialise the per-row allocations
+// when both files are sorted at once; mimalloc keeps per-thread heaps.
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};

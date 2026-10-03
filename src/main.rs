@@ -1,3 +1,8 @@
+// The default macOS and glibc allocators serialise the per-row allocations
+// when both files are sorted at once; mimalloc keeps per-thread heaps.
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
