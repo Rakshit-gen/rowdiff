@@ -23,6 +23,9 @@ pub struct Normalize {
     pub trim: bool,
     /// Compare case-insensitively.
     pub ignore_case: bool,
+    /// When both cells parse as numbers, treat them as equal if they differ by
+    /// at most this much. `Some(0.0)` still makes "1.0" equal "1".
+    pub tolerance: Option<f64>,
 }
 
 impl Normalize {
@@ -36,7 +39,13 @@ impl Normalize {
     }
 
     pub fn same(&self, a: &str, b: &str) -> bool {
-        a == b || self.apply(a) == self.apply(b)
+        if a == b || self.apply(a) == self.apply(b) {
+            return true;
+        }
+        match (self.tolerance, a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+            (Some(t), Ok(x), Ok(y)) => (x - y).abs() <= t,
+            _ => false,
+        }
     }
 }
 
@@ -292,7 +301,7 @@ mod tests {
     fn trim_and_case_apply_to_keys_and_cells() {
         let h = header("id,name", "id");
         let cols = ColumnMap::new(&h, &h, &[]);
-        let norm = Normalize { trim: true, ignore_case: true };
+        let norm = Normalize { trim: true, ignore_case: true, tolerance: None };
         let mk = |rows: &[&str]| -> Vec<Result<Rec>> {
             rows.iter()
                 .map(|r| {
@@ -303,6 +312,16 @@ mod tests {
         };
         let s = merge_join(mk(&[" AB1 ,Pen "]), mk(&["ab1,pen"]), &cols, &norm, |_| {}).unwrap();
         assert_eq!((s.unchanged, s.changed, s.added), (1, 0, 0));
+    }
+
+    #[test]
+    fn tolerance_only_loosens_numbers() {
+        let n = Normalize { tolerance: Some(0.005), ..Normalize::default() };
+        assert!(n.same("1.0", "1"));
+        assert!(n.same("19.999", "20.00"));
+        assert!(!n.same("19.99", "20.00"));
+        assert!(!n.same("1.0x", "1"));
+        assert!(!Normalize::default().same("1.0", "1"));
     }
 
     #[test]

@@ -30,6 +30,9 @@ struct Cli {
     /// Treat "Pen" and "pen" as the same value.
     #[arg(long)]
     ignore_case: bool,
+    /// Numbers within this distance count as equal. 0 still treats 1.0 and 1 as the same.
+    #[arg(long)]
+    tolerance: Option<f64>,
     /// Memory for sorting before it spills to disk, like 512M or 2G.
     #[arg(long, default_value = "512M", value_parser = parse_size)]
     memory: usize,
@@ -82,7 +85,7 @@ fn run() -> Result<bool> {
         key: cli.key,
         ignore: cli.ignore,
         delimiter: delimiter(&cli.delimiter)?,
-        normalize: Normalize { trim: cli.trim, ignore_case: cli.ignore_case },
+        normalize: Normalize { trim: cli.trim, ignore_case: cli.ignore_case, tolerance: cli.tolerance },
         memory: cli.memory,
         tmp_dir: None,
     };
