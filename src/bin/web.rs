@@ -31,9 +31,10 @@ struct Cli {
     /// Address to listen on.
     #[arg(long, default_value = "127.0.0.1:7878")]
     addr: SocketAddr,
-    /// The built web UI.
-    #[arg(long, default_value = "web/dist")]
-    static_dir: PathBuf,
+    /// Serve the UI from this directory instead of the copy built into the
+    /// binary. Handy while working on the UI.
+    #[arg(long)]
+    static_dir: Option<PathBuf>,
     /// Largest upload accepted, in megabytes, for both files together.
     #[arg(long, default_value_t = 4096)]
     max_upload_mb: usize,
@@ -153,6 +154,48 @@ fn run_job(d: Diff, progress: &Progress, dir: &Path) -> anyhow::Result<Results> 
         by_kind,
         by_column,
     })
+}
+
+/// The UI from web/dist, compiled in so the binary runs on its own. Build the
+/// UI first (`pnpm --dir web build`); without it the binary still builds and
+/// the API works, but the pages are missing.
+#[derive(rust_embed::RustEmbed)]
+#[folder = "web/dist"]
+#[allow_missing = true]
+struct Ui;
+
+async fn embedded_ui(uri: axum::http::Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let (file, path) = match Ui::get(path) {
+        Some(f) if !path.is_empty() => (f, path),
+        // Unknown paths get the app shell; the app reads ?diff= itself.
+        _ => match Ui::get("index.html") {
+            Some(f) => (f, "index.html"),
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    "This build has no UI. Run `pnpm --dir web build` and rebuild, or pass --static-dir.",
+                )
+                    .into_response();
+            }
+        },
+    };
+    let cache = if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    (
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                file.metadata.mimetype().to_string(),
+            ),
+            (axum::http::header::CACHE_CONTROL, cache.to_string()),
+        ],
+        file.data,
+    )
+        .into_response()
 }
 
 /// An error the browser can show as is.
@@ -463,8 +506,6 @@ async fn remove(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let ui =
-        ServeDir::new(&cli.static_dir).fallback(ServeFile::new(cli.static_dir.join("index.html")));
     let state = Arc::new(App {
         dir: tempfile::Builder::new().prefix("rowdiff-web-").tempdir()?,
         next: AtomicU64::new(1),
@@ -477,8 +518,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/diffs/{id}/changes.csv", get(export))
         .route("/api/diffs/{id}/rows", get(rows))
         .layer(DefaultBodyLimit::max(cli.max_upload_mb << 20))
-        .with_state(state)
-        .fallback_service(ui);
+        .with_state(state);
+    let app = match &cli.static_dir {
+        Some(dir) => app
+            .fallback_service(ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")))),
+        None => app.fallback(embedded_ui),
+    };
 
     let listener = tokio::net::TcpListener::bind(cli.addr).await?;
     println!("rowdiff is running at http://{}", cli.addr);
