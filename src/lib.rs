@@ -4,6 +4,8 @@
 //! sorted runs on disk) and then walked side by side, so memory use is bounded
 //! by the sort budget rather than by file size.
 
+pub mod diff;
+
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
