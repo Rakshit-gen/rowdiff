@@ -26,9 +26,10 @@ pub fn change_json(a: &Header, b: &Header, cols: &ColumnMap, c: &Change) -> Valu
         Change::Removed { key, row } => {
             json!({ "kind": "removed", "key": key_parts(key), "row": row_object(a, row) })
         }
-        Change::Changed { key, cells } => json!({
+        Change::Changed { key, cells, row } => json!({
             "kind": "changed",
             "key": key_parts(key),
+            "row": row_object(b, row),
             "cells": cells.iter().map(|c| json!({
                 "column": cols.common[c.col].2,
                 "old": c.old,
@@ -75,7 +76,7 @@ pub fn change_csv_rows(cols: &ColumnMap, c: &Change) -> Vec<[String; 5]> {
                 String::new(),
             ]]
         }
-        Change::Changed { key, cells } => cells
+        Change::Changed { key, cells, .. } => cells
             .iter()
             .map(|c| {
                 [

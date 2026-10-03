@@ -286,7 +286,7 @@ fn print_change(out: &mut impl Write, r: &Report, c: &Change) -> std::io::Result
     match c {
         Change::Added { key, .. } => writeln!(out, "+ {}", show_key(key)),
         Change::Removed { key, .. } => writeln!(out, "- {}", show_key(key)),
-        Change::Changed { key, cells } => {
+        Change::Changed { key, cells, .. } => {
             let parts: Vec<_> = cells
                 .iter()
                 .map(|cell| {

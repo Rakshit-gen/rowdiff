@@ -3,6 +3,7 @@ name = "rowdiff"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+default-run = "rowdiff"
 description = "Diff two CSV exports by key, including files larger than memory"
 
 [dependencies]

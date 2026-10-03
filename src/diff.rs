@@ -123,9 +123,11 @@ pub enum Change {
         key: String,
         row: StringRecord,
     },
+    /// `row` is the row as it is in the second file, for context.
     Changed {
         key: String,
         cells: Vec<CellChange>,
+        row: StringRecord,
     },
     /// A later row repeating a key already seen in the same file. Only the
     /// first row with a key takes part in the diff.
@@ -262,7 +264,11 @@ where
                     for c in &cells {
                         s.per_column[c.col] += 1;
                     }
-                    emit(Change::Changed { key: ra.key, cells });
+                    emit(Change::Changed {
+                        key: ra.key,
+                        cells,
+                        row: rb.row,
+                    });
                 }
                 x = a.next(&mut s, &mut emit)?;
                 y = b.next(&mut s, &mut emit)?;
@@ -345,7 +351,8 @@ mod tests {
                     col: 1,
                     old: "5".into(),
                     new: "6".into()
-                }]
+                }],
+                row: StringRecord::from(vec!["2", "6", "cup"]),
             }
         );
         assert!(matches!(&out[2], Change::Added { key, .. } if key == "4"));
