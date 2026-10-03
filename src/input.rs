@@ -58,7 +58,9 @@ impl Read for Input {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &mut self.0 {
             Inner::Plain(c) => c.read(buf),
-            Inner::Gzip(d) => d.read(buf),
+            Inner::Gzip(d) => d.read(buf).map_err(|e| {
+                io::Error::new(e.kind(), format!("gzip data is damaged or cut short ({e})"))
+            }),
         }
     }
 }
