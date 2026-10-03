@@ -75,6 +75,15 @@ pub enum Change {
     Added { key: String, row: StringRecord },
     Removed { key: String, row: StringRecord },
     Changed { key: String, cells: Vec<CellChange> },
+    /// A later row repeating a key already seen in the same file. Only the
+    /// first row with a key takes part in the diff.
+    Duplicate { side: Side, key: String, row: StringRecord },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    A,
+    B,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -85,8 +94,40 @@ pub struct Summary {
     pub removed: u64,
     pub changed: u64,
     pub unchanged: u64,
+    pub duplicates_a: u64,
+    pub duplicates_b: u64,
     /// Changed-row count per entry of `ColumnMap::common`.
     pub per_column: Vec<u64>,
+}
+
+/// One input stream that drops (and reports) rows whose key repeats.
+struct Stream<I> {
+    it: I,
+    side: Side,
+    last: Option<String>,
+}
+
+impl<I: Iterator<Item = Result<Rec>>> Stream<I> {
+    fn next(&mut self, s: &mut Summary, emit: &mut impl FnMut(Change)) -> Result<Option<Rec>> {
+        for r in self.it.by_ref() {
+            let r = r?;
+            match self.side {
+                Side::A => s.rows_a += 1,
+                Side::B => s.rows_b += 1,
+            }
+            if self.last.as_deref() == Some(r.key.as_str()) {
+                match self.side {
+                    Side::A => s.duplicates_a += 1,
+                    Side::B => s.duplicates_b += 1,
+                }
+                emit(Change::Duplicate { side: self.side, key: r.key, row: r.row });
+                continue;
+            }
+            self.last = Some(r.key.clone());
+            return Ok(Some(r));
+        }
+        Ok(None)
+    }
 }
 
 /// Walk two key-sorted streams side by side.
@@ -95,11 +136,11 @@ where
     A: IntoIterator<Item = Result<Rec>>,
     B: IntoIterator<Item = Result<Rec>>,
 {
-    let mut a = a.into_iter();
-    let mut b = b.into_iter();
     let mut s = Summary { per_column: vec![0; cols.common.len()], ..Summary::default() };
-    let mut x = a.next().transpose()?;
-    let mut y = b.next().transpose()?;
+    let mut a = Stream { it: a.into_iter(), side: Side::A, last: None };
+    let mut b = Stream { it: b.into_iter(), side: Side::B, last: None };
+    let mut x = a.next(&mut s, &mut emit)?;
+    let mut y = b.next(&mut s, &mut emit)?;
 
     loop {
         let ord = match (&x, &y) {
@@ -111,22 +152,18 @@ where
         match ord {
             Ordering::Less => {
                 let r = x.take().unwrap();
-                s.rows_a += 1;
                 s.removed += 1;
                 emit(Change::Removed { key: r.key, row: r.row });
-                x = a.next().transpose()?;
+                x = a.next(&mut s, &mut emit)?;
             }
             Ordering::Greater => {
                 let r = y.take().unwrap();
-                s.rows_b += 1;
                 s.added += 1;
                 emit(Change::Added { key: r.key, row: r.row });
-                y = b.next().transpose()?;
+                y = b.next(&mut s, &mut emit)?;
             }
             Ordering::Equal => {
                 let (ra, rb) = (x.take().unwrap(), y.take().unwrap());
-                s.rows_a += 1;
-                s.rows_b += 1;
                 let cells = compare(&ra.row, &rb.row, cols);
                 if cells.is_empty() {
                     s.unchanged += 1;
@@ -137,8 +174,8 @@ where
                     }
                     emit(Change::Changed { key: ra.key, cells });
                 }
-                x = a.next().transpose()?;
-                y = b.next().transpose()?;
+                x = a.next(&mut s, &mut emit)?;
+                y = b.next(&mut s, &mut emit)?;
             }
         }
     }
@@ -206,6 +243,18 @@ mod tests {
         assert_eq!(cols.only_a, vec!["legacy"]);
         assert_eq!(cols.only_b, vec!["email"]);
         assert_eq!(cols.common.len(), 1);
+    }
+
+    #[test]
+    fn repeated_keys_are_reported_and_skipped() {
+        let h = header("id,v", "id");
+        let cols = ColumnMap::new(&h, &h, &[]);
+        let a = recs(&h, &["1,x", "1,y", "2,z"]);
+        let b = recs(&h, &["1,x", "2,z"]);
+        let mut out = Vec::new();
+        let s = merge_join(a, b, &cols, |c| out.push(c)).unwrap();
+        assert_eq!((s.rows_a, s.duplicates_a, s.changed, s.unchanged), (3, 1, 0, 2));
+        assert!(matches!(&out[0], Change::Duplicate { side: Side::A, key, .. } if key == "1"));
     }
 
     #[test]
