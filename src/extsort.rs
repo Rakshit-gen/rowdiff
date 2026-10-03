@@ -7,6 +7,7 @@ use std::path::Path;
 use csv::StringRecord;
 
 use crate::diff::{Normalize, Rec, make_key};
+use crate::progress::{EVERY, Progress};
 use crate::{Error, Header, Result};
 
 /// Rows of one file in key order.
@@ -46,13 +47,26 @@ pub fn sort_rows(
     norm: &Normalize,
     budget: usize,
     tmp: &Path,
-) -> Result<Sorted> {
+    progress: &Progress,
+) -> Result<(Sorted, u64)> {
     let mut buf: Vec<Rec> = Vec::new();
     let mut used = 0;
     let mut runs = Vec::new();
-    for row in reader.records() {
-        let row = row.map_err(|e| csv_err(&header.path, e))?;
-        let rec = Rec { key: make_key(&row, &header.key_idx, norm), row };
+    let mut rows = 0u64;
+    let mut row = csv::StringRecord::new();
+    while reader
+        .read_record(&mut row)
+        .map_err(|e| csv_err(&header.path, e))?
+    {
+        rows += 1;
+        if rows % EVERY == 0 {
+            progress.set(reader.position().byte());
+        }
+        let row = std::mem::take(&mut row);
+        let rec = Rec {
+            key: make_key(&row, &header.key_idx, norm),
+            row,
+        };
         used += cost(&rec);
         buf.push(rec);
         if used >= budget {
@@ -62,18 +76,21 @@ pub fn sort_rows(
     }
     buf.sort_by(|a, b| a.key.cmp(&b.key));
     if runs.is_empty() {
-        return Ok(Sorted::Memory(buf.into_iter()));
+        return Ok((Sorted::Memory(buf.into_iter()), rows));
     }
     if !buf.is_empty() {
         runs.push(spill(&mut buf, tmp)?);
     }
-    Merge::new(runs, tmp).map(Sorted::Merge)
+    Ok((Sorted::Merge(Merge::new(runs, tmp)?), rows))
 }
 
 /// Write a sorted run as CSV: key first, then the row's fields.
 fn spill(buf: &mut Vec<Rec>, tmp: &Path) -> Result<File> {
     buf.sort_by(|a, b| a.key.cmp(&b.key));
-    let io = |source| Error::Io { path: tmp.to_path_buf(), source };
+    let io = |source| Error::Io {
+        path: tmp.to_path_buf(),
+        source,
+    };
     let mut file = tempfile::tempfile_in(tmp).map_err(io)?;
     {
         let mut w = csv::WriterBuilder::new()
@@ -156,12 +173,18 @@ impl Merge {
         if let Err(e) = self.refill(h.run) {
             return Some(Err(e));
         }
-        Some(Ok(Rec { key: h.key, row: h.row }))
+        Some(Ok(Rec {
+            key: h.key,
+            row: h.row,
+        }))
     }
 }
 
 pub(crate) fn csv_err(path: &Path, source: csv::Error) -> Error {
-    Error::Csv { path: path.to_path_buf(), source }
+    Error::Csv {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 #[cfg(test)]
@@ -173,21 +196,36 @@ mod tests {
     fn sorted(budget: usize, data: &str) -> Vec<(String, Vec<String>)> {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("in.csv");
-        File::create(&path).unwrap().write_all(data.as_bytes()).unwrap();
-        let opts = Options { key: vec!["id".into()], ..Options::default() };
-        let (h, r) = open(&path, &opts).unwrap();
-        sort_rows(&h, r, &Normalize::default(), budget, dir.path())
+        File::create(&path)
             .unwrap()
-            .map(|r| {
-                let r = r.unwrap();
-                (r.key, r.row.iter().map(String::from).collect())
-            })
-            .collect()
+            .write_all(data.as_bytes())
+            .unwrap();
+        let opts = Options {
+            key: vec!["id".into()],
+            ..Options::default()
+        };
+        let (h, r) = open(&path, &opts).unwrap();
+        sort_rows(
+            &h,
+            r,
+            &Normalize::default(),
+            budget,
+            dir.path(),
+            &Progress::default(),
+        )
+        .unwrap()
+        .0
+        .map(|r| {
+            let r = r.unwrap();
+            (r.key, r.row.iter().map(String::from).collect())
+        })
+        .collect()
     }
 
     #[test]
     fn spilled_merge_matches_in_memory_sort() {
-        let data = "id,v\n5,e\n3,c\n9,\"has, comma\"\n1,a\n3,second\n7,\"line\nbreak\"\n,empty key\n";
+        let data =
+            "id,v\n5,e\n3,c\n9,\"has, comma\"\n1,a\n3,second\n7,\"line\nbreak\"\n,empty key\n";
         let mem = sorted(usize::MAX, data);
         // A 1-byte budget spills every row into its own run.
         let disk = sorted(1, data);

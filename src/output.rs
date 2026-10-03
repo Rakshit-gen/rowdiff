@@ -2,8 +2,8 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::diff::{Change, ColumnMap, KEY_SEP, Side};
 use crate::Header;
+use crate::diff::{Change, ColumnMap, KEY_SEP, Side};
 
 pub fn key_parts(key: &str) -> Vec<&str> {
     key.split(KEY_SEP).collect()
@@ -20,8 +20,12 @@ fn row_object(h: &Header, row: &csv::StringRecord) -> Value {
 /// One change as a JSON object, with column names spelled out.
 pub fn change_json(a: &Header, b: &Header, cols: &ColumnMap, c: &Change) -> Value {
     match c {
-        Change::Added { key, row } => json!({ "kind": "added", "key": key_parts(key), "row": row_object(b, row) }),
-        Change::Removed { key, row } => json!({ "kind": "removed", "key": key_parts(key), "row": row_object(a, row) }),
+        Change::Added { key, row } => {
+            json!({ "kind": "added", "key": key_parts(key), "row": row_object(b, row) })
+        }
+        Change::Removed { key, row } => {
+            json!({ "kind": "removed", "key": key_parts(key), "row": row_object(a, row) })
+        }
         Change::Changed { key, cells } => json!({
             "kind": "changed",
             "key": key_parts(key),
@@ -43,15 +47,45 @@ pub fn change_json(a: &Header, b: &Header, cols: &ColumnMap, c: &Change) -> Valu
 pub fn change_csv_rows(cols: &ColumnMap, c: &Change) -> Vec<[String; 5]> {
     let k = |key: &str| key_parts(key).join(" | ");
     match c {
-        Change::Added { key, .. } => vec![["added".into(), k(key), String::new(), String::new(), String::new()]],
-        Change::Removed { key, .. } => vec![["removed".into(), k(key), String::new(), String::new(), String::new()]],
+        Change::Added { key, .. } => vec![[
+            "added".into(),
+            k(key),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]],
+        Change::Removed { key, .. } => vec![[
+            "removed".into(),
+            k(key),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]],
         Change::Duplicate { side, key, .. } => {
-            let what = if *side == Side::A { "repeated in a" } else { "repeated in b" };
-            vec![[what.into(), k(key), String::new(), String::new(), String::new()]]
+            let what = if *side == Side::A {
+                "repeated in a"
+            } else {
+                "repeated in b"
+            };
+            vec![[
+                what.into(),
+                k(key),
+                String::new(),
+                String::new(),
+                String::new(),
+            ]]
         }
         Change::Changed { key, cells } => cells
             .iter()
-            .map(|c| ["changed".into(), k(key), cols.common[c.col].2.clone(), c.old.clone(), c.new.clone()])
+            .map(|c| {
+                [
+                    "changed".into(),
+                    k(key),
+                    cols.common[c.col].2.clone(),
+                    c.old.clone(),
+                    c.new.clone(),
+                ]
+            })
             .collect(),
     }
 }

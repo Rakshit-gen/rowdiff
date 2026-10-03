@@ -96,7 +96,11 @@ fn run() -> Result<bool> {
         key: cli.key,
         ignore: cli.ignore,
         delimiter: delimiter(&cli.delimiter)?,
-        normalize: Normalize { trim: cli.trim, ignore_case: cli.ignore_case, tolerance: cli.tolerance },
+        normalize: Normalize {
+            trim: cli.trim,
+            ignore_case: cli.ignore_case,
+            tolerance: cli.tolerance,
+        },
         memory: cli.memory,
         tmp_dir: None,
     };
@@ -215,15 +219,37 @@ fn print_summary(out: &mut impl Write, r: &Report) -> std::io::Result<()> {
         )?;
     }
     if !r.columns.only_a.is_empty() {
-        writeln!(out, "columns only in {}: {}", r.a.path.display(), r.columns.only_a.join(", "))?;
+        writeln!(
+            out,
+            "columns only in {}: {}",
+            r.a.path.display(),
+            r.columns.only_a.join(", ")
+        )?;
     }
     if !r.columns.only_b.is_empty() {
-        writeln!(out, "columns only in {}: {}", r.b.path.display(), r.columns.only_b.join(", "))?;
+        writeln!(
+            out,
+            "columns only in {}: {}",
+            r.b.path.display(),
+            r.columns.only_b.join(", ")
+        )?;
     }
     if s.changed > 0 {
         writeln!(out, "\nchanged rows by column")?;
-        let width = r.columns.common.iter().map(|c| c.2.len()).max().unwrap_or(0);
-        let mut by_col: Vec<_> = r.columns.common.iter().zip(&s.per_column).filter(|(_, n)| **n > 0).collect();
+        let width = r
+            .columns
+            .common
+            .iter()
+            .map(|c| c.2.len())
+            .max()
+            .unwrap_or(0);
+        let mut by_col: Vec<_> = r
+            .columns
+            .common
+            .iter()
+            .zip(&s.per_column)
+            .filter(|(_, n)| **n > 0)
+            .collect();
         by_col.sort_by(|x, y| y.1.cmp(x.1));
         for ((_, _, name), n) in by_col {
             writeln!(out, "  {name:width$}  {n}")?;
@@ -239,12 +265,21 @@ fn print_change(out: &mut impl Write, r: &Report, c: &Change) -> std::io::Result
         Change::Changed { key, cells } => {
             let parts: Vec<_> = cells
                 .iter()
-                .map(|cell| format!("{}: {:?} -> {:?}", r.columns.common[cell.col].2, cell.old, cell.new))
+                .map(|cell| {
+                    format!(
+                        "{}: {:?} -> {:?}",
+                        r.columns.common[cell.col].2, cell.old, cell.new
+                    )
+                })
                 .collect();
             writeln!(out, "~ {}  {}", show_key(key), parts.join(", "))
         }
         Change::Duplicate { side, key, .. } => {
-            let file = if *side == Side::A { &r.a.path } else { &r.b.path };
+            let file = if *side == Side::A {
+                &r.a.path
+            } else {
+                &r.b.path
+            };
             writeln!(out, "! {}  repeated in {}", show_key(key), file.display())
         }
     }

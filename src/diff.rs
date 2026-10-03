@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 
 use csv::StringRecord;
 
+use crate::progress::{EVERY, Progress};
 use crate::{Header, Result};
 
 /// One row, with its key flattened to a single sortable string.
@@ -42,7 +43,11 @@ impl Normalize {
         if a == b || self.apply(a) == self.apply(b) {
             return true;
         }
-        match (self.tolerance, a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+        match (
+            self.tolerance,
+            a.trim().parse::<f64>(),
+            b.trim().parse::<f64>(),
+        ) {
             (Some(t), Ok(x), Ok(y)) => (x - y).abs() <= t,
             _ => false,
         }
@@ -92,7 +97,11 @@ impl ColumnMap {
             })
             .map(|(_, n)| n.clone())
             .collect();
-        ColumnMap { common, only_a, only_b }
+        ColumnMap {
+            common,
+            only_a,
+            only_b,
+        }
     }
 }
 
@@ -106,12 +115,25 @@ pub struct CellChange {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
-    Added { key: String, row: StringRecord },
-    Removed { key: String, row: StringRecord },
-    Changed { key: String, cells: Vec<CellChange> },
+    Added {
+        key: String,
+        row: StringRecord,
+    },
+    Removed {
+        key: String,
+        row: StringRecord,
+    },
+    Changed {
+        key: String,
+        cells: Vec<CellChange>,
+    },
     /// A later row repeating a key already seen in the same file. Only the
     /// first row with a key takes part in the diff.
-    Duplicate { side: Side, key: String, row: StringRecord },
+    Duplicate {
+        side: Side,
+        key: String,
+        row: StringRecord,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,13 +157,14 @@ pub struct Summary {
 }
 
 /// One input stream that drops (and reports) rows whose key repeats.
-struct Stream<I> {
+struct Stream<'p, I> {
     it: I,
     side: Side,
     last: Option<String>,
+    progress: &'p Progress,
 }
 
-impl<I: Iterator<Item = Result<Rec>>> Stream<I> {
+impl<I: Iterator<Item = Result<Rec>>> Stream<'_, I> {
     fn next(&mut self, s: &mut Summary, emit: &mut impl FnMut(Change)) -> Result<Option<Rec>> {
         for r in self.it.by_ref() {
             let r = r?;
@@ -149,12 +172,19 @@ impl<I: Iterator<Item = Result<Rec>>> Stream<I> {
                 Side::A => s.rows_a += 1,
                 Side::B => s.rows_b += 1,
             }
+            if self.side == Side::A && s.rows_a % EVERY == 0 {
+                self.progress.set(s.rows_a);
+            }
             if self.last.as_deref() == Some(r.key.as_str()) {
                 match self.side {
                     Side::A => s.duplicates_a += 1,
                     Side::B => s.duplicates_b += 1,
                 }
-                emit(Change::Duplicate { side: self.side, key: r.key, row: r.row });
+                emit(Change::Duplicate {
+                    side: self.side,
+                    key: r.key,
+                    row: r.row,
+                });
                 continue;
             }
             self.last = Some(r.key.clone());
@@ -170,15 +200,29 @@ pub fn merge_join<A, B>(
     b: B,
     cols: &ColumnMap,
     norm: &Normalize,
+    progress: &Progress,
     mut emit: impl FnMut(Change),
 ) -> Result<Summary>
 where
     A: IntoIterator<Item = Result<Rec>>,
     B: IntoIterator<Item = Result<Rec>>,
 {
-    let mut s = Summary { per_column: vec![0; cols.common.len()], ..Summary::default() };
-    let mut a = Stream { it: a.into_iter(), side: Side::A, last: None };
-    let mut b = Stream { it: b.into_iter(), side: Side::B, last: None };
+    let mut s = Summary {
+        per_column: vec![0; cols.common.len()],
+        ..Summary::default()
+    };
+    let mut a = Stream {
+        it: a.into_iter(),
+        side: Side::A,
+        last: None,
+        progress,
+    };
+    let mut b = Stream {
+        it: b.into_iter(),
+        side: Side::B,
+        last: None,
+        progress,
+    };
     let mut x = a.next(&mut s, &mut emit)?;
     let mut y = b.next(&mut s, &mut emit)?;
 
@@ -193,13 +237,19 @@ where
             Ordering::Less => {
                 let r = x.take().unwrap();
                 s.removed += 1;
-                emit(Change::Removed { key: r.key, row: r.row });
+                emit(Change::Removed {
+                    key: r.key,
+                    row: r.row,
+                });
                 x = a.next(&mut s, &mut emit)?;
             }
             Ordering::Greater => {
                 let r = y.take().unwrap();
                 s.added += 1;
-                emit(Change::Added { key: r.key, row: r.row });
+                emit(Change::Added {
+                    key: r.key,
+                    row: r.row,
+                });
                 y = b.next(&mut s, &mut emit)?;
             }
             Ordering::Equal => {
@@ -222,12 +272,21 @@ where
     Ok(s)
 }
 
-fn compare(a: &StringRecord, b: &StringRecord, cols: &ColumnMap, norm: &Normalize) -> Vec<CellChange> {
+fn compare(
+    a: &StringRecord,
+    b: &StringRecord,
+    cols: &ColumnMap,
+    norm: &Normalize,
+) -> Vec<CellChange> {
     let mut out = Vec::new();
     for (n, (ia, ib, _)) in cols.common.iter().enumerate() {
         let (va, vb) = (a.get(*ia).unwrap_or(""), b.get(*ib).unwrap_or(""));
         if !norm.same(va, vb) {
-            out.push(CellChange { col: n, old: va.to_string(), new: vb.to_string() });
+            out.push(CellChange {
+                col: n,
+                old: va.to_string(),
+                new: vb.to_string(),
+            });
         }
     }
     out
@@ -250,7 +309,10 @@ mod tests {
         rows.iter()
             .map(|r| {
                 let row = StringRecord::from(r.split(',').collect::<Vec<_>>());
-                Ok(Rec { key: make_key(&row, &h.key_idx, &Normalize::default()), row })
+                Ok(Rec {
+                    key: make_key(&row, &h.key_idx, &Normalize::default()),
+                    row,
+                })
             })
             .collect()
     }
@@ -263,13 +325,28 @@ mod tests {
         let a = recs(&ha, &["1,pen,10", "2,cup,5", "3,mug,7"]);
         let b = recs(&hb, &["2,6,cup", "3,7,mug", "4,1,pad"]);
         let mut out = Vec::new();
-        let s = merge_join(a, b, &cols, &Normalize::default(), |c| out.push(c)).unwrap();
+        let s = merge_join(
+            a,
+            b,
+            &cols,
+            &Normalize::default(),
+            &Progress::default(),
+            |c| out.push(c),
+        )
+        .unwrap();
 
         assert_eq!((s.added, s.removed, s.changed, s.unchanged), (1, 1, 1, 1));
         assert!(matches!(&out[0], Change::Removed { key, .. } if key == "1"));
         assert_eq!(
             out[1],
-            Change::Changed { key: "2".into(), cells: vec![CellChange { col: 1, old: "5".into(), new: "6".into() }] }
+            Change::Changed {
+                key: "2".into(),
+                cells: vec![CellChange {
+                    col: 1,
+                    old: "5".into(),
+                    new: "6".into()
+                }]
+            }
         );
         assert!(matches!(&out[2], Change::Added { key, .. } if key == "4"));
         assert_eq!(s.per_column, vec![0, 1]);
@@ -292,8 +369,19 @@ mod tests {
         let a = recs(&h, &["1,x", "1,y", "2,z"]);
         let b = recs(&h, &["1,x", "2,z"]);
         let mut out = Vec::new();
-        let s = merge_join(a, b, &cols, &Normalize::default(), |c| out.push(c)).unwrap();
-        assert_eq!((s.rows_a, s.duplicates_a, s.changed, s.unchanged), (3, 1, 0, 2));
+        let s = merge_join(
+            a,
+            b,
+            &cols,
+            &Normalize::default(),
+            &Progress::default(),
+            |c| out.push(c),
+        )
+        .unwrap();
+        assert_eq!(
+            (s.rows_a, s.duplicates_a, s.changed, s.unchanged),
+            (3, 1, 0, 2)
+        );
         assert!(matches!(&out[0], Change::Duplicate { side: Side::A, key, .. } if key == "1"));
     }
 
@@ -301,22 +389,40 @@ mod tests {
     fn trim_and_case_apply_to_keys_and_cells() {
         let h = header("id,name", "id");
         let cols = ColumnMap::new(&h, &h, &[]);
-        let norm = Normalize { trim: true, ignore_case: true, tolerance: None };
+        let norm = Normalize {
+            trim: true,
+            ignore_case: true,
+            tolerance: None,
+        };
         let mk = |rows: &[&str]| -> Vec<Result<Rec>> {
             rows.iter()
                 .map(|r| {
                     let row = StringRecord::from(r.split(',').collect::<Vec<_>>());
-                    Ok(Rec { key: make_key(&row, &h.key_idx, &norm), row })
+                    Ok(Rec {
+                        key: make_key(&row, &h.key_idx, &norm),
+                        row,
+                    })
                 })
                 .collect()
         };
-        let s = merge_join(mk(&[" AB1 ,Pen "]), mk(&["ab1,pen"]), &cols, &norm, |_| {}).unwrap();
+        let s = merge_join(
+            mk(&[" AB1 ,Pen "]),
+            mk(&["ab1,pen"]),
+            &cols,
+            &norm,
+            &Progress::default(),
+            |_| {},
+        )
+        .unwrap();
         assert_eq!((s.unchanged, s.changed, s.added), (1, 0, 0));
     }
 
     #[test]
     fn tolerance_only_loosens_numbers() {
-        let n = Normalize { tolerance: Some(0.005), ..Normalize::default() };
+        let n = Normalize {
+            tolerance: Some(0.005),
+            ..Normalize::default()
+        };
         assert!(n.same("1.0", "1"));
         assert!(n.same("19.999", "20.00"));
         assert!(!n.same("19.99", "20.00"));
