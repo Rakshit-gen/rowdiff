@@ -65,7 +65,8 @@ that is removed when the server stops. While working on the UI, run
 ## Options
 
 ```
--k, --key <COL>        column that identifies a row; repeat for a composite key
+-k, --key <COL>        column that identifies a row; repeat for a composite key.
+                       Leave it out and rowdiff lists the columns and guesses one
 -i, --ignore <COL>     leave a column out of the comparison; can be repeated
 -d, --delimiter <C>    field delimiter, one byte; '\t' for tabs (default ,)
     --trim             ignore leading and trailing spaces

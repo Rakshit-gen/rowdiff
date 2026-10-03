@@ -34,6 +34,34 @@ pub enum Error {
     },
     #[error("{path}: the file is empty, there is no header row")]
     NoHeader { path: PathBuf },
+    #[error("{}", no_key_message(columns))]
+    NoKey { columns: Vec<String> },
+}
+
+fn no_key_message(columns: &[String]) -> String {
+    let mut msg = format!(
+        "pick the column that identifies a row with -k. Columns are: {}",
+        columns.join(", ")
+    );
+    if let Some(k) = guess_key(columns) {
+        msg += &format!(". Probably -k {k}");
+    }
+    msg
+}
+
+/// A likely key column from its name, or None when nothing stands out.
+/// The web app makes the same guess in `web/src/csv.ts`.
+pub fn guess_key(columns: &[String]) -> Option<&str> {
+    let lower: Vec<String> = columns.iter().map(|c| c.to_lowercase()).collect();
+    ["id", "sku", "key", "uuid", "code"]
+        .iter()
+        .find_map(|name| lower.iter().position(|c| c == name))
+        .or_else(|| {
+            lower
+                .iter()
+                .position(|c| c.ends_with("_id") || c.ends_with(" id"))
+        })
+        .map(|i| columns[i].as_str())
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -78,6 +106,9 @@ impl Header {
     pub fn new(path: PathBuf, columns: Vec<String>, key: &[String]) -> Result<Header> {
         if columns.is_empty() {
             return Err(Error::NoHeader { path });
+        }
+        if key.is_empty() {
+            return Err(Error::NoKey { columns });
         }
         let mut key_idx = Vec::with_capacity(key.len());
         for k in key {

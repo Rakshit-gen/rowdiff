@@ -25,7 +25,8 @@ struct Cli {
     /// The newer file.
     b: PathBuf,
     /// Column that identifies a row. Repeat it for a composite key.
-    #[arg(short, long, required = true)]
+    /// Leave it out to list the columns.
+    #[arg(short, long)]
     key: Vec<String>,
     /// Column to leave out of the comparison. Can be repeated.
     #[arg(short, long)]

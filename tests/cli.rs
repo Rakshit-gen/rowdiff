@@ -80,3 +80,16 @@ fn missing_file_exits_2() {
     let out = rowdiff(&[&a, &dir.path().join("nope.csv")], &["-k", "sku"]);
     assert_eq!(out.status.code(), Some(2));
 }
+
+#[test]
+fn no_key_lists_columns_and_suggests_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = files(dir.path());
+    let out = rowdiff(&[&a, &b], &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        err.contains("Columns are: sku, qty, price. Probably -k sku"),
+        "{err}"
+    );
+}
