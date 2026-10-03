@@ -13,6 +13,8 @@
   --changed-bg: #fdf3dc;
   --focus: #2457c5;
   --radius: 4px;
+  --quick: 120ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
   --sans: "Source Sans 3 Variable", system-ui, sans-serif;
   --mono: "Source Code Pro", ui-monospace, monospace;
   color-scheme: light;
@@ -39,6 +41,18 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Motion here only ever marks a change of state: something was picked,
+   loaded, opened or moved. Turned off entirely for people who ask. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after,
+  ::backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 body {
@@ -101,6 +115,9 @@ h1 {
   background: var(--surface);
   padding: 16px;
   min-height: 150px;
+  transition:
+    border-color var(--quick),
+    background-color var(--quick);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -118,6 +135,18 @@ h1 {
 
 .slot-label {
   font-weight: 600;
+}
+
+.slot-filled .slot-name,
+.slot-filled .slot-meta {
+  animation: settle 220ms var(--ease-out);
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .slot-name {
@@ -190,6 +219,16 @@ h1 {
   border-radius: var(--radius);
   padding: 3px 8px;
   cursor: pointer;
+  transition:
+    background-color var(--quick),
+    border-color var(--quick),
+    color var(--quick),
+    transform 80ms;
+}
+
+.chip:active,
+.button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .chip:hover {
@@ -248,6 +287,10 @@ h1 {
   cursor: pointer;
   text-decoration: none;
   display: inline-block;
+  transition:
+    background-color var(--quick),
+    border-color var(--quick),
+    transform 80ms;
 }
 
 .button:hover:not(:disabled) {
@@ -295,11 +338,6 @@ h1 {
   transition: width 0.2s linear;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .bar-fill {
-    transition: none;
-  }
-}
 
 code,
 .file {
