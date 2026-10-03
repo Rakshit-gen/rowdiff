@@ -7,6 +7,7 @@ use std::path::Path;
 use csv::StringRecord;
 
 use crate::diff::{Normalize, Rec, make_key};
+use crate::input::Input;
 use crate::progress::EVERY;
 use crate::{Error, Header, Result};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -45,7 +46,7 @@ fn cost(r: &Rec) -> usize {
 /// breaking ties by run number, so rows sharing a key keep their file order.
 pub fn sort_rows(
     header: &Header,
-    mut reader: csv::Reader<File>,
+    mut reader: csv::Reader<Input>,
     norm: &Normalize,
     budget: usize,
     tmp: &Path,
@@ -62,7 +63,7 @@ pub fn sort_rows(
     {
         rows += 1;
         if rows.is_multiple_of(EVERY) {
-            progress.store(reader.position().byte(), Relaxed);
+            progress.store(reader.get_ref().bytes_read(), Relaxed);
         }
         let row = std::mem::take(&mut row);
         let rec = Rec {

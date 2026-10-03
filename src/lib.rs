@@ -6,10 +6,11 @@
 
 pub mod diff;
 pub mod extsort;
+pub mod input;
 pub mod output;
 pub mod progress;
 
-use std::fs::File;
+use input::Input;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -101,8 +102,8 @@ impl Header {
 
 /// Open a CSV file and read its header. Ragged rows are allowed; a missing
 /// trailing cell reads as empty.
-pub fn open(path: &Path, opts: &Options) -> Result<(Header, csv::Reader<File>)> {
-    let file = File::open(path).map_err(|err| Error::Io {
+pub fn open(path: &Path, opts: &Options) -> Result<(Header, csv::Reader<Input>)> {
+    let file = Input::open(path).map_err(|err| Error::Io {
         path: path.to_path_buf(),
         err,
     })?;
@@ -136,8 +137,8 @@ pub struct Diff {
     pub a: Header,
     pub b: Header,
     pub columns: diff::ColumnMap,
-    ra: csv::Reader<File>,
-    rb: csv::Reader<File>,
+    ra: csv::Reader<Input>,
+    rb: csv::Reader<Input>,
     opts: Options,
 }
 
