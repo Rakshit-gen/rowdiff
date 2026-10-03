@@ -18,6 +18,25 @@
   color-scheme: light;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #161614;
+    --surface: #1e1e1b;
+    --ink: #ecebe6;
+    --muted: #a5a29a;
+    --line: #2f2e2a;
+    --line-strong: #4a4842;
+    --added: #6cc788;
+    --added-bg: #15301e;
+    --removed: #f08a7e;
+    --removed-bg: #3a1a17;
+    --changed: #e3b55b;
+    --changed-bg: #352a12;
+    --focus: #7aa2f7;
+    color-scheme: dark;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -232,7 +251,7 @@ h1 {
 }
 
 .button:hover:not(:disabled) {
-  background: #3a3934;
+  background: color-mix(in srgb, var(--ink) 85%, var(--ground));
 }
 
 .button:disabled {
