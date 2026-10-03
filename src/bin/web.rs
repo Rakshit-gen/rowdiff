@@ -46,6 +46,7 @@ struct App {
 }
 
 struct Job {
+    key: Vec<String>,
     name_a: String,
     name_b: String,
     columns_a: Vec<String>,
@@ -257,6 +258,7 @@ async fn create(
     })?;
 
     let job = Arc::new(Job {
+        key: opts.key.clone(),
         name_a,
         name_b,
         columns_a: d.a.columns.clone(),
@@ -281,6 +283,7 @@ fn status_json(id: u64, job: &Job) -> Value {
     let (phase, done, total) = job.progress.snapshot();
     let mut v = json!({
         "id": id,
+        "key": job.key,
         "a": { "name": job.name_a, "columns": job.columns_a },
         "b": { "name": job.name_b, "columns": job.columns_b },
         "phase": phase,

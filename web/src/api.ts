@@ -19,6 +19,7 @@ export interface Summary {
 
 export interface Status {
   id: number;
+  key: string[];
   a: { name: string; columns: string[] };
   b: { name: string; columns: string[] };
   status: "running" | "failed" | "done";

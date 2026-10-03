@@ -456,3 +456,105 @@ code,
   text-decoration: underline;
   cursor: pointer;
 }
+
+.table {
+  margin-top: 12px;
+}
+
+.table-scroll {
+  height: min(70vh, 640px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.tr {
+  display: grid;
+  align-items: center;
+  position: absolute;
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  border-bottom: 1px solid var(--line);
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ground);
+  font-weight: 600;
+  font-size: 14px;
+  height: 34px;
+}
+
+.td {
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 13px/34px var(--mono);
+}
+
+.th .td {
+  font-family: var(--sans);
+  font-size: 14px;
+}
+
+.td.key {
+  font-weight: 600;
+}
+
+.mark {
+  text-align: center;
+  padding: 0;
+  font-weight: 600;
+}
+
+.row-added {
+  background: var(--added-bg);
+}
+
+.row-added .mark {
+  color: var(--added);
+}
+
+.row-removed {
+  background: var(--removed-bg);
+}
+
+.row-removed .mark {
+  color: var(--removed);
+}
+
+.row-changed .mark,
+.row-duplicate .mark {
+  color: var(--changed);
+}
+
+.cell-changed {
+  background: var(--changed-bg);
+}
+
+.cell-changed del {
+  color: var(--removed);
+}
+
+.cell-changed ins {
+  color: var(--added);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.loading .td {
+  width: 40%;
+  height: 8px;
+  margin-left: 2.25rem;
+  background: var(--line);
+  border-radius: 2px;
+}
+
+.empty-table {
+  padding: 24px 0;
+}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type Kind, type RowFilter, type Status, exportUrl } from "./api";
+import { ChangeTable } from "./ChangeTable";
 import { num, plural } from "./format";
 
 const TABS: { kind: Kind | "all"; label: string }[] = [
@@ -118,7 +119,14 @@ export function Results(props: { status: Status; onReset: () => void }) {
               </button>
             </p>
           )}
-          <pre className="help">{JSON.stringify(filter)}</pre>
+          <ChangeTable
+            key={JSON.stringify(filter)}
+            id={status.id}
+            filter={filter}
+            total={filter.column ? (s.changed_by_column[filter.column] ?? 0) : counts[filter.kind ?? "all"]}
+            keyCols={status.key}
+            columns={status.compared_columns ?? []}
+          />
         </div>
       </div>
     </section>
