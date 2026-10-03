@@ -5,8 +5,10 @@
 //! by the sort budget rather than by file size.
 
 pub mod diff;
+pub mod extsort;
 
-use std::path::PathBuf;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -65,6 +67,24 @@ impl Header {
         }
         Ok(Header { path, columns, key_idx })
     }
+}
+
+/// Open a CSV file and read its header. Ragged rows are allowed; a missing
+/// trailing cell reads as empty.
+pub fn open(path: &Path, opts: &Options) -> Result<(Header, csv::Reader<File>)> {
+    let file = File::open(path).map_err(|source| Error::Io { path: path.to_path_buf(), source })?;
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(opts.delimiter)
+        .flexible(true)
+        .from_reader(file);
+    let columns = reader
+        .headers()
+        .map_err(|e| extsort::csv_err(path, e))?
+        .iter()
+        .map(String::from)
+        .collect();
+    let header = Header::new(path.to_path_buf(), columns, &opts.key)?;
+    Ok((header, reader))
 }
 
 #[cfg(test)]
