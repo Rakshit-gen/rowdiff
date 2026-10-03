@@ -6,6 +6,7 @@
 
 pub mod diff;
 pub mod extsort;
+pub mod output;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -109,18 +110,40 @@ pub struct Report {
     pub summary: diff::Summary,
 }
 
+/// Two opened files with their headers read and columns matched up, ready to
+/// diff. Splitting this from `run` lets callers see the columns before any
+/// rows stream out.
+pub struct Diff {
+    pub a: Header,
+    pub b: Header,
+    pub columns: diff::ColumnMap,
+    ra: csv::Reader<File>,
+    rb: csv::Reader<File>,
+    opts: Options,
+}
+
+impl Diff {
+    pub fn prepare(a: &Path, b: &Path, opts: &Options) -> Result<Diff> {
+        let (ha, ra) = open(a, opts)?;
+        let (hb, rb) = open(b, opts)?;
+        let columns = diff::ColumnMap::new(&ha, &hb, &opts.ignore);
+        Ok(Diff { a: ha, b: hb, columns, ra, rb, opts: opts.clone() })
+    }
+
+    pub fn run(self, emit: impl FnMut(diff::Change)) -> Result<Report> {
+        let tmp = self.opts.tmp_dir.clone().unwrap_or_else(std::env::temp_dir);
+        let half = (self.opts.memory / 2).max(1);
+        let n = &self.opts.normalize;
+        let sa = extsort::sort_rows(&self.a, self.ra, n, half, &tmp)?;
+        let sb = extsort::sort_rows(&self.b, self.rb, n, half, &tmp)?;
+        let summary = diff::merge_join(sa, sb, &self.columns, n, emit)?;
+        Ok(Report { a: self.a, b: self.b, columns: self.columns, summary })
+    }
+}
+
 /// Diff two CSV files by `opts.key`, calling `emit` for every row that differs.
 pub fn diff_files(a: &Path, b: &Path, opts: &Options, emit: impl FnMut(diff::Change)) -> Result<Report> {
-    let tmp = opts.tmp_dir.clone().unwrap_or_else(std::env::temp_dir);
-    let (ha, ra) = open(a, opts)?;
-    let (hb, rb) = open(b, opts)?;
-    let columns = diff::ColumnMap::new(&ha, &hb, &opts.ignore);
-    let half = (opts.memory / 2).max(1);
-    let n = &opts.normalize;
-    let sa = extsort::sort_rows(&ha, ra, n, half, &tmp)?;
-    let sb = extsort::sort_rows(&hb, rb, n, half, &tmp)?;
-    let summary = diff::merge_join(sa, sb, &columns, n, emit)?;
-    Ok(Report { a: ha, b: hb, columns, summary })
+    Diff::prepare(a, b, opts)?.run(emit)
 }
 
 #[cfg(test)]

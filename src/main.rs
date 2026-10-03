@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use rowdiff::diff::{Change, KEY_SEP, Normalize, Side};
-use rowdiff::{Options, Report, diff_files};
+use rowdiff::output::{change_csv_rows, change_json};
+use rowdiff::{Diff, Options, Report};
 
 /// Compare two CSV exports by key.
 #[derive(Parser)]
@@ -36,9 +37,19 @@ struct Cli {
     /// Memory for sorting before it spills to disk, like 512M or 2G.
     #[arg(long, default_value = "512M", value_parser = parse_size)]
     memory: usize,
-    /// How many changed rows to print.
+    /// text for people; jsonl or csv print every change for other tools.
+    #[arg(short, long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+    /// How many changed rows to print in text format.
     #[arg(long, default_value_t = 20)]
     limit: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+enum Format {
+    Text,
+    Jsonl,
+    Csv,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -90,16 +101,26 @@ fn run() -> Result<bool> {
         tmp_dir: None,
     };
 
+    let d = Diff::prepare(&cli.a, &cli.b, &opts)?;
+    let report = match cli.format {
+        Format::Text => text(d, cli.limit)?,
+        Format::Jsonl => jsonl(d)?,
+        Format::Csv => csv_out(d)?,
+    };
+    let s = &report.summary;
+    Ok(s.added + s.removed + s.changed + s.duplicates_a + s.duplicates_b > 0)
+}
+
+fn text(d: Diff, limit: usize) -> Result<Report> {
     let mut shown = Vec::new();
     let mut hidden = 0u64;
-    let report = diff_files(&cli.a, &cli.b, &opts, |c| {
-        if shown.len() < cli.limit {
+    let report = d.run(|c| {
+        if shown.len() < limit {
             shown.push(c);
         } else {
             hidden += 1;
         }
     })?;
-
     let mut out = std::io::stdout().lock();
     print_summary(&mut out, &report)?;
     if !shown.is_empty() {
@@ -111,8 +132,67 @@ fn run() -> Result<bool> {
     if hidden > 0 {
         writeln!(out, "... and {hidden} more. Raise --limit to see them.")?;
     }
+    Ok(report)
+}
+
+/// Every change as one JSON object per line, then a summary line.
+fn jsonl(d: Diff) -> Result<Report> {
+    let (a, b, cols) = (d.a.clone(), d.b.clone(), d.columns.clone());
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    let mut err = None;
+    let report = d.run(|c| {
+        if err.is_none()
+            && let Err(e) = writeln!(out, "{}", change_json(&a, &b, &cols, &c))
+        {
+            err = Some(e);
+        }
+    })?;
+    if let Some(e) = err {
+        return Err(e.into());
+    }
     let s = &report.summary;
-    Ok(s.added + s.removed + s.changed + s.duplicates_a + s.duplicates_b > 0)
+    let per_column: serde_json::Map<_, _> = cols
+        .common
+        .iter()
+        .zip(&s.per_column)
+        .map(|((_, _, name), n)| (name.clone(), (*n).into()))
+        .collect();
+    writeln!(
+        out,
+        "{}",
+        serde_json::json!({
+            "kind": "summary",
+            "rows_a": s.rows_a, "rows_b": s.rows_b,
+            "added": s.added, "removed": s.removed, "changed": s.changed, "unchanged": s.unchanged,
+            "duplicates_a": s.duplicates_a, "duplicates_b": s.duplicates_b,
+            "only_in_a": cols.only_a, "only_in_b": cols.only_b,
+            "changed_by_column": per_column,
+        })
+    )?;
+    out.flush()?;
+    Ok(report)
+}
+
+/// Every change as `kind,key,column,old,new`, one line per changed cell.
+fn csv_out(d: Diff) -> Result<Report> {
+    let cols = d.columns.clone();
+    let mut w = csv::Writer::from_writer(std::io::stdout().lock());
+    w.write_record(["kind", "key", "column", "old", "new"])?;
+    let mut err = None;
+    let report = d.run(|c| {
+        for row in change_csv_rows(&cols, &c) {
+            if err.is_none()
+                && let Err(e) = w.write_record(&row)
+            {
+                err = Some(e);
+            }
+        }
+    })?;
+    if let Some(e) = err {
+        return Err(e.into());
+    }
+    w.flush()?;
+    Ok(report)
 }
 
 fn print_summary(out: &mut impl Write, r: &Report) -> std::io::Result<()> {
